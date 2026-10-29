@@ -179,11 +179,15 @@ class BpmControl : public EngineControl {
     std::unique_ptr<ControlObject> m_pBeatsUntilPhrase;
     // mixxx::PhraseKind of the current phrase
     std::unique_ptr<ControlObject> m_pPhraseKind;
+    // mixxx::Phrase::bass of the current section, -1 if unknown
+    std::unique_ptr<ControlObject> m_pSectionBass;
     std::unique_ptr<ControlPushButton> m_pBarShiftEarlier;
     std::unique_ptr<ControlPushButton> m_pBarShiftLater;
     std::unique_ptr<ControlPushButton> m_pPhraseShiftEarlier;
     std::unique_ptr<ControlPushButton> m_pPhraseShiftLater;
     std::unique_ptr<ControlPushButton> m_pBarSetCurpos;
+    // Places the cues of the MixAssistant again at the current sections
+    std::unique_ptr<ControlPushButton> m_pSectionCuesReset;
 
     // The current effective BPM of the engine
     std::unique_ptr<ControlLinPotmeter> m_pEngineBpm;

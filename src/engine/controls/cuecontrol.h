@@ -238,6 +238,9 @@ class CueControl : public EngineControl {
     void hotcueCueLoop(HotcueControl* pControl, double v);
     void hotcueActivate(HotcueControl* pControl, double v, HotcueSetMode mode);
     void hotcueActivatePreview(HotcueControl* pControl, double v);
+    /// Cues and hotcues start playing immediately, also if "play on next
+    /// phrase" of the MixAssistant is enabled.
+    void startPlayImmediately();
     void updateCurrentlyPreviewingIndex(int hotcueIndex);
     void hotcueClear(HotcueControl* pControl, double v);
     void hotcueSwap(HotcueControl* pHotcue, double v);

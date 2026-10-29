@@ -542,6 +542,9 @@ class Track : public QObject {
     /// Sets beats and returns a boolean to indicate if BPM/Beats were updated.
     /// Only supposed to be called while the caller guards this a lock.
     bool setBeatsWhileLocked(mixxx::BeatsPointer pBeats);
+    /// Moves the cues that AnalyzerBars placed at the start of sections
+    /// along with the sections, e.g. if the beats are translated.
+    void moveSectionCuesWhileLocked(const mixxx::Beats& oldBeats, const mixxx::Beats& newBeats);
 
     /// Imports pending beats from a BeatImporter and returns a boolean to
     /// indicate if BPM/beats were updated. Only supposed to be called while

@@ -1128,7 +1128,7 @@ void CueControl::hotcueGotoAndPlay(HotcueControl* pControl, double value) {
         if (!m_pPlay->toBool()) {
             // don't move the cue point to the hot cue point in DENON mode
             m_bypassCueSetByPlay = true;
-            m_pPlay->set(1.0);
+            startPlayImmediately();
         }
     }
 
@@ -1165,7 +1165,7 @@ void CueControl::hotcueGotoAndLoop(HotcueControl* pControl, double value) {
     if (!m_pPlay->toBool()) {
         // don't move the cue point to the hot cue point in DENON mode
         m_bypassCueSetByPlay = true;
-        m_pPlay->set(1.0);
+        startPlayImmediately();
     }
 
     setHotcueFocusIndex(pControl->getHotcueIndex());
@@ -1297,7 +1297,7 @@ void CueControl::hotcueActivatePreview(HotcueControl* pControl, double value) {
                 } else if (pControl->getStatus() == HotcueControl::Status::Set) {
                     pControl->setStatus(HotcueControl::Status::Active);
                 }
-                m_pPlay->set(1.0);
+                startPlayImmediately();
             }
         }
     } else if (m_currentlyPreviewingIndex == index) {
@@ -1311,6 +1311,15 @@ void CueControl::hotcueActivatePreview(HotcueControl* pControl, double value) {
     }
 
     setHotcueFocusIndex(pControl->getHotcueIndex());
+}
+
+void CueControl::startPlayImmediately() {
+    EngineBuffer* pEngineBuffer = getEngineBuffer();
+    if (pEngineBuffer) {
+        pEngineBuffer->setPlayBypassingPhraseLaunch();
+    } else {
+        m_pPlay->set(1.0);
+    }
 }
 
 void CueControl::updateCurrentlyPreviewingIndex(int hotcueIndex) {
@@ -1512,7 +1521,7 @@ void CueControl::cueGotoAndPlay(double value) {
     if (!m_pPlay->toBool()) {
         // don't move the cue point to the hot cue point in DENON mode
         m_bypassCueSetByPlay = true;
-        m_pPlay->set(1.0);
+        startPlayImmediately();
     }
 }
 
@@ -1550,7 +1559,7 @@ void CueControl::cuePreview(double value) {
 
         updateCurrentlyPreviewingIndex(kMainCueIndex);
         seekAbs(mainCuePosition);
-        m_pPlay->set(1.0);
+        startPlayImmediately();
     } else if (m_currentlyPreviewingIndex == kMainCueIndex) {
         updateCurrentlyPreviewingIndex(Cue::kNoHotCue);
         m_pPlay->set(0.0);
@@ -1592,7 +1601,7 @@ void CueControl::cueCDJ(double value) {
         } else if (trackAt == TrackAt::Cue) {
             // paused at cue point
             updateCurrentlyPreviewingIndex(kMainCueIndex);
-            m_pPlay->set(1.0);
+            startPlayImmediately();
         } else {
             // Paused not at cue point and not at end position
             cueSet(value);
@@ -1653,7 +1662,7 @@ void CueControl::cueDenon(double value) {
         } else if (!playing && trackAt == TrackAt::Cue) {
             // paused at cue point
             updateCurrentlyPreviewingIndex(kMainCueIndex);
-            m_pPlay->set(1.0);
+            startPlayImmediately();
         } else {
             m_pPlay->set(0.0);
             seekExact(mainCuePosition);
@@ -1707,7 +1716,7 @@ void CueControl::cuePlay(double value) {
         }
     } else if (trackAt == TrackAt::Cue) {
         updateCurrentlyPreviewingIndex(Cue::kNoHotCue);
-        m_pPlay->set(1.0);
+        startPlayImmediately();
     }
 }
 
@@ -1750,7 +1759,7 @@ void CueControl::playStutter(double v) {
                 cueGoto(1.0);
             }
         } else {
-            m_pPlay->set(1.0);
+            startPlayImmediately();
         }
     }
 }

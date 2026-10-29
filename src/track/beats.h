@@ -65,6 +65,9 @@ enum class PhraseKind {
     Outro,
 };
 
+/// Name of the section, also the label of the hotcues placed at the sections
+QString phraseKindName(PhraseKind kind);
+
 /// An analyzed section of a track (intro, drop, ...), which lasts until the
 /// start of the next section (or the end of the track). It consists of one or
 /// more phrases of `kDefaultBarsPerPhrase` bars, the last of which may be
@@ -75,6 +78,9 @@ struct Phrase {
     PhraseKind kind = PhraseKind::Unknown;
     /// Relative energy of the phrase in the range [0, 1].
     float energy = 0.f;
+    /// Level of the bass (kick and bassline) in the range [0, 1], where 1 is
+    /// the strongest bass of the track and 0 means no bass.
+    float bass = 0.f;
 };
 
 /// Bar and phrase structure on top of the beats.

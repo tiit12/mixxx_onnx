@@ -694,7 +694,7 @@ TEST(BeatsTest, BarInfoSectionShorterThanPhrase) {
 
 TEST(BeatsTest, BarInfoSerializationRoundTrip) {
     const auto pBarInfo = makeBarInfo(5,
-            {Phrase{5, PhraseKind::Intro, 0.25f}, Phrase{69, PhraseKind::Drop, 1.f}});
+            {Phrase{5, PhraseKind::Intro, 0.25f}, Phrase{69, PhraseKind::Drop, 1.f, 0.8f}});
     for (const Beats* pBeats : {&kConstTempoBeats, &kNonConstTempoBeats}) {
         const auto pWithBarInfo = pBeats->withBarInfo(pBarInfo);
         const auto pDeserialized = Beats::fromByteArray(kSampleRate,
@@ -710,6 +710,7 @@ TEST(BeatsTest, BarInfoSerializationRoundTrip) {
         EXPECT_EQ(69, pResult->phrases[1].startBeat);
         EXPECT_EQ(PhraseKind::Drop, pResult->phrases[1].kind);
         EXPECT_FLOAT_EQ(0.25f, pResult->phrases[0].energy);
+        EXPECT_FLOAT_EQ(0.8f, pResult->phrases[1].bass);
         // The beat indices refer to the same beat positions
         EXPECT_EQ(*(pWithBarInfo->cfirstmarker() + 5), *(pDeserialized->cfirstmarker() + 5));
     }

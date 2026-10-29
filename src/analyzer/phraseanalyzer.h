@@ -1,9 +1,11 @@
 #pragma once
 
+#include <QString>
 #include <array>
 #include <vector>
 
 #include "track/beats.h"
+#include "util/color/rgbcolor.h"
 
 namespace mixxx {
 
@@ -39,6 +41,11 @@ class PhraseAnalyzer {
     static std::vector<Phrase> analyze(const Beats& beats,
             const BarInfo& barInfo,
             const BandEnergies& energies);
+
+    /// Color of the sections in the waveform and of their hotcues
+    static RgbColor sectionColor(PhraseKind kind);
+    /// Label of the hotcues of the sections
+    static QString sectionName(PhraseKind kind);
 };
 
 } // namespace mixxx

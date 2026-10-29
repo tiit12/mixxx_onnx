@@ -37,6 +37,8 @@ message Phrase {
   optional PhraseKind kind = 2 [ default = PHRASE_UNKNOWN ];
   // Relative energy of the phrase in the range [0, 1].
   optional float energy = 3;
+  // Level of the bass in the range [0, 1].
+  optional float bass = 4;
 }
 
 message BarInfo {

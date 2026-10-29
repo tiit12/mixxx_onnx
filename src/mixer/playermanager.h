@@ -22,6 +22,7 @@ class EffectsManager;
 class EngineMixer;
 class Library;
 class Microphone;
+class MixAssistant;
 class PreviewDeck;
 class Sampler;
 class SamplerBank;
@@ -296,6 +297,8 @@ class PlayerManager : public PlayerManagerInterface {
     std::unique_ptr<ControlObject> m_pCONumPreviewDecks;
     std::unique_ptr<ControlObject> m_pCONumMicrophones;
     std::unique_ptr<ControlObject> m_pCONumAuxiliaries;
+    // Created before the decks, which use its controls
+    std::unique_ptr<MixAssistant> m_pMixAssistant;
     parented_ptr<ControlProxy> m_pAutoDjEnabled;
 
     TrackAnalysisScheduler::Pointer m_pTrackAnalysisScheduler;

@@ -86,6 +86,7 @@ EngineBuffer::EngineBuffer(const QString& group,
           m_bSlipEnabledProcessing(false),
           m_slipModeState(SlipModeState::Disabled),
           m_quantize(ControlFlag::AllowMissingOrInvalid),
+          m_playOnPhraseMode(ControlFlag::AllowMissingOrInvalid),
           m_pRepeat(nullptr),
           m_startButton(nullptr),
           m_endButton(nullptr),
@@ -196,6 +197,18 @@ EngineBuffer::EngineBuffer(const QString& group,
     QuantizeControl* pQuantize_control = new QuantizeControl(group, pConfig);
     addControl(pQuantize_control);
     m_quantize = PollingControlProxy(ConfigKey(group, "quantize"));
+
+    // Created by the MixAssistant, missing in tests
+    m_playOnPhraseMode = PollingControlProxy(
+            ConfigKey(QStringLiteral("[MixAssistant]"), QStringLiteral("play_on_phrase")),
+            ControlFlag::AllowMissingOrInvalid);
+    m_pPlayOnPhraseArmed = new ControlObject(ConfigKey(m_group, "play_on_phrase_armed"));
+    m_pPlayOnPhraseLaunch = new ControlPushButton(ConfigKey(m_group, "play_on_phrase_launch"));
+    connect(m_pPlayOnPhraseLaunch,
+            &ControlObject::valueChanged,
+            this,
+            &EngineBuffer::slotPlayOnPhraseLaunch,
+            Qt::DirectConnection);
 
     // Create the Loop Controller
     m_pLoopingControl = new LoopingControl(group, pConfig);
@@ -329,6 +342,8 @@ EngineBuffer::~EngineBuffer() {
     delete m_pSampleRate;
 
     delete m_pTrackLoaded;
+    delete m_pPlayOnPhraseArmed;
+    delete m_pPlayOnPhraseLaunch;
     delete m_pTrackSamples;
     delete m_pTrackSampleRate;
 
@@ -531,13 +546,17 @@ void EngineBuffer::slotTrackLoading() {
     m_pause.unlock();
 
     // Set play here, to signal the user that the play command is adopted
-    m_playButton->set((double)m_bPlayAfterLoading);
+    if (m_bPlayAfterLoading) {
+        setPlayBypassingPhraseLaunch();
+    } else {
+        m_playButton->set(0.0);
+    }
     setTrackEndPosition(mixxx::audio::kInvalidFramePos); // Stop renderer
 }
 
 void EngineBuffer::loadFakeTrack(TrackPointer pTrack, bool bPlay) {
     if (bPlay) {
-        m_playButton->set((double)bPlay);
+        setPlayBypassingPhraseLaunch();
     }
     slotTrackLoaded(pTrack,
             pTrack->getSampleRate(),
@@ -807,6 +826,22 @@ void EngineBuffer::verifyPlay() {
 
 void EngineBuffer::slotControlPlayRequest(double v) {
     bool oldPlay = m_playButton->toBool();
+    if (v <= 0.0) {
+        m_pPlayOnPhraseArmed->forceSet(0);
+    } else if (!oldPlay && m_playOnPhraseMode.toBool() && isTrackLoaded() &&
+            m_phraseLaunchBypass.loadRelaxed() == 0) {
+        if (m_pPlayOnPhraseArmed->toBool()) {
+            // Pressing play again starts immediately
+            m_pPlayOnPhraseArmed->forceSet(0);
+        } else {
+            // Wait until the MixAssistant launches the deck at the next
+            // phrase of the playing deck
+            m_pPlayOnPhraseArmed->forceSet(1);
+            m_playButton->setAndConfirm(0.0);
+            return;
+        }
+    }
+
     bool verifiedPlay = updateIndicatorsAndModifyPlay(v > 0.0, oldPlay);
 
     if (!oldPlay && verifiedPlay) {
@@ -821,6 +856,23 @@ void EngineBuffer::slotControlPlayRequest(double v) {
 
     // set and confirm must be called here in any case to update the widget toggle state
     m_playButton->setAndConfirm(verifiedPlay ? 1.0 : 0.0);
+}
+
+void EngineBuffer::setPlayBypassingPhraseLaunch() {
+    m_phraseLaunchBypass.ref();
+    m_playButton->set(1.0);
+    m_phraseLaunchBypass.deref();
+}
+
+void EngineBuffer::slotPlayOnPhraseLaunch(double v) {
+    if (v <= 0.0 || !m_pPlayOnPhraseArmed->toBool()) {
+        return;
+    }
+    m_pPlayOnPhraseArmed->forceSet(0);
+    setPlayBypassingPhraseLaunch();
+    // The launch is a few milliseconds late, align the beats also if
+    // quantize is disabled
+    requestSyncPhase();
 }
 
 void EngineBuffer::slotControlStart(double v)
@@ -841,7 +893,7 @@ void EngineBuffer::slotControlPlayFromStart(double v)
 {
     if (v > 0.0) {
         doSeekFractional(0., SEEK_EXACT);
-        m_playButton->set(1);
+        setPlayBypassingPhraseLaunch();
     }
 }
 

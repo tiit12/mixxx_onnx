@@ -76,6 +76,9 @@ constexpr int kMinBarsForBuildupSplit = 16;
 /// if the high band of the drop is this many units stronger ("pre-drop").
 constexpr double kPreDropMinHighRise = 0.75;
 constexpr int kPreDropMaxBars = 16;
+/// The bass level of a section is 0 if its bass is this many units (15 dB)
+/// below the strongest bass of the track.
+constexpr double kBassLevelRange = 2.5;
 
 using BarFeatures = std::array<double, kNumBands>;
 using SegmentFeatures = std::array<double, kNumSegmentFeatures>;
@@ -219,6 +222,30 @@ PhraseKind labelSection(const std::vector<Section>& sections, int index, int fir
 }
 
 } // namespace
+
+// static
+RgbColor PhraseAnalyzer::sectionColor(PhraseKind kind) {
+    switch (kind) {
+    case PhraseKind::Intro:
+        return RgbColor(0x3C78FF);
+    case PhraseKind::Buildup:
+        return RgbColor(0xFFD200);
+    case PhraseKind::Drop:
+        return RgbColor(0xFF2828);
+    case PhraseKind::Breakdown:
+        return RgbColor(0x28C878);
+    case PhraseKind::Outro:
+        return RgbColor(0xA05AFF);
+    case PhraseKind::Unknown:
+        break;
+    }
+    return RgbColor(0x969696);
+}
+
+// static
+QString PhraseAnalyzer::sectionName(PhraseKind kind) {
+    return phraseKindName(kind);
+}
 
 // static
 std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
@@ -483,17 +510,23 @@ std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
     for (int i = 0; i < numSections; ++i) {
         const Section& section = sections[i];
         const int length = section.endBar - section.firstBar;
+        const auto bassLevel = static_cast<float>(std::clamp(
+                1.0 + (section.bass - strongestBass) / kBassLevelRange, 0.0, 1.0));
         if (i > 0 && kinds[i] == kinds[i - 1]) {
-            // Length weighted mean energy
+            // Length weighted means
             Phrase& merged = phrases.back();
-            merged.energy = static_cast<float>(
-                    (merged.energy * mergedBars + section.relativeEnergy * length) /
-                    (mergedBars + length));
+            const auto mergedMean = [&](float mergedValue, double value) {
+                return static_cast<float>(
+                        (mergedValue * mergedBars + value * length) / (mergedBars + length));
+            };
+            merged.energy = mergedMean(merged.energy, section.relativeEnergy);
+            merged.bass = mergedMean(merged.bass, bassLevel);
             mergedBars += length;
         } else {
             phrases.push_back(Phrase{firstBarBeat + section.firstBar * beatsPerBar,
                     kinds[i],
-                    static_cast<float>(section.relativeEnergy)});
+                    static_cast<float>(section.relativeEnergy),
+                    bassLevel});
             mergedBars = length;
         }
         kLogger.debug() << "Section at bar" << section.firstBar << "length"

@@ -2,8 +2,10 @@
 
 #include <QColor>
 #include <QVector4D>
+#include <memory>
 #include <vector>
 
+#include "control/pollingcontrolproxy.h"
 #include "rendergraph/geometrynode.h"
 #include "util/class.h"
 #include "waveform/renderers/waveformrendererabstract.h"
@@ -53,6 +55,8 @@ class allshader::WaveformRenderBeat final
     bool m_isSlipRenderer;
     // Reused to avoid allocations
     std::vector<VisibleSection> m_visibleSections;
+    // Warning of the MixAssistant, created once the control exists
+    std::unique_ptr<PollingControlProxy> m_pBassClash;
 
     bool preprocessInner();
 

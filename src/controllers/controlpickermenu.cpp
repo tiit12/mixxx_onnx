@@ -366,6 +366,46 @@ ControlPickerMenu::ControlPickerMenu(QWidget* pParent)
     pBpmMenu->addSeparator();
     addDeckAndSamplerControl("quantize", tr("Quantize Mode"), tr("Toggle quantize mode"), pBpmMenu);
 
+    // Bars and phrases of the bar analysis and the MixAssistant
+    QMenu* pPhraseMenu = addSubmenu(tr("Bars / Phrases"));
+    addDeckControl("bar_shift_earlier",
+            tr("Move Downbeats Earlier"),
+            tr("Move the first beat of the bars (and the phrases) one beat earlier"),
+            pPhraseMenu);
+    addDeckControl("bar_shift_later",
+            tr("Move Downbeats Later"),
+            tr("Move the first beat of the bars (and the phrases) one beat later"),
+            pPhraseMenu);
+    addDeckControl("phrase_shift_earlier",
+            tr("Move Phrases Earlier"),
+            tr("Move the start of the phrases one bar earlier"),
+            pPhraseMenu);
+    addDeckControl("phrase_shift_later",
+            tr("Move Phrases Later"),
+            tr("Move the start of the phrases one bar later"),
+            pPhraseMenu);
+    addDeckControl("bar_set_curpos",
+            tr("Set Phrase Start"),
+            tr("Make the beat at the play position the first beat of a phrase"),
+            pPhraseMenu);
+    addDeckControl("section_cues_reset",
+            tr("Place Section Cues Again"),
+            tr("Place the hotcues and intro/outro markers of the sections again "
+               "at the current sections"),
+            pPhraseMenu);
+    pPhraseMenu->addSeparator();
+    addControl(QStringLiteral("[MixAssistant]"),
+            QStringLiteral("play_on_phrase"),
+            tr("Start Decks on the Next Phrase"),
+            tr("Toggle waiting for the next phrase of the playing deck when "
+               "pressing play"),
+            pPhraseMenu);
+    addControl(QStringLiteral("[MixAssistant]"),
+            QStringLiteral("bass_clash_warning"),
+            tr("Bass Clash Warning"),
+            tr("Toggle the warning if the bass of two decks clashes"),
+            pPhraseMenu);
+
     QMenu* pSyncMenu = addSubmenu(tr("Sync"));
     addDeckAndSamplerControl("sync_enabled",
             tr("Sync / Sync Lock"),

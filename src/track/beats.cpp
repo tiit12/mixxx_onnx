@@ -71,6 +71,7 @@ void barInfoToProto(const mixxx::BarInfo& barInfo, mixxx::track::io::BarInfo* pP
         pPhrase->set_start_beat(phrase.startBeat);
         pPhrase->set_kind(phraseKindToProto(phrase.kind));
         pPhrase->set_energy(phrase.energy);
+        pPhrase->set_bass(phrase.bass);
     }
 }
 
@@ -92,7 +93,8 @@ mixxx::BarInfoPointer barInfoFromProto(const mixxx::track::io::BarInfo& proto) {
         pBarInfo->phrases.push_back(mixxx::Phrase{
                 phrase.start_beat(),
                 phraseKindFromProto(phrase.kind()),
-                phrase.energy()});
+                phrase.energy(),
+                phrase.bass()});
     }
     std::sort(pBarInfo->phrases.begin(),
             pBarInfo->phrases.end(),
@@ -105,6 +107,24 @@ mixxx::BarInfoPointer barInfoFromProto(const mixxx::track::io::BarInfo& proto) {
 } // namespace
 
 namespace mixxx {
+
+QString phraseKindName(PhraseKind kind) {
+    switch (kind) {
+    case PhraseKind::Intro:
+        return QStringLiteral("Intro");
+    case PhraseKind::Buildup:
+        return QStringLiteral("Buildup");
+    case PhraseKind::Drop:
+        return QStringLiteral("Drop");
+    case PhraseKind::Breakdown:
+        return QStringLiteral("Breakdown");
+    case PhraseKind::Outro:
+        return QStringLiteral("Outro");
+    case PhraseKind::Unknown:
+        break;
+    }
+    return QStringLiteral("Section");
+}
 
 const Phrase* BarInfo::findPhrase(int beatIndex) const {
     const auto it = std::upper_bound(phrases.cbegin(),

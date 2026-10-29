@@ -1536,6 +1536,7 @@ add_library(
   src/mixer/basetrackplayer.cpp
   src/mixer/deck.cpp
   src/mixer/microphone.cpp
+  src/mixer/mixassistant.cpp
   src/mixer/playerinfo.cpp
   src/mixer/playermanager.cpp
   src/mixer/previewdeck.cpp
@@ -1584,6 +1585,7 @@ add_library(
   src/preferences/dialog/dlgprefkeydlg.ui
   src/preferences/dialog/dlgpreflibrary.cpp
   src/preferences/dialog/dlgpreflibrarydlg.ui
+  src/preferences/dialog/dlgprefmixassistant.cpp
   src/preferences/dialog/dlgprefmixer.cpp
   src/preferences/dialog/dlgprefmixerdlg.ui
   src/preferences/dialog/dlgprefrecord.cpp
@@ -2933,6 +2935,7 @@ if(BUILD_TESTING)
     src/test/beatgridtest.cpp
     src/test/beatmaptest.cpp
     src/test/beatstest.cpp
+    src/test/mixassistanttest.cpp
     src/test/phraseanalyzertest.cpp
     src/test/beatstranslatetest.cpp
     src/test/borrowabletest.cpp

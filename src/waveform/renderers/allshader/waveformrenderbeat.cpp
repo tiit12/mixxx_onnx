@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "analyzer/phraseanalyzer.h"
+#include "control/controlobject.h"
 #include "engine/engine.h"
 #include "moc_waveformrenderbeat.cpp"
 #include "rendergraph/geometry.h"
@@ -29,26 +31,16 @@ constexpr float kSectionBandRelativeHeight = 0.05f;
 constexpr float kSectionBandAlpha = 0.85f;
 constexpr float kSectionStartWidth = 4.f;
 
+// Bar at the top of the waveform if the bass of two decks clashes
+const QVector4D kBassClashColor(1.f, 0.f, 0.f, 0.9f);
+constexpr float kBassClashRelativeHeight = 0.08f;
+
 QVector4D toVector4D(const QColor& color, float alpha) {
     return QVector4D(color.redF(), color.greenF(), color.blueF(), alpha);
 }
 
 QColor sectionColor(mixxx::PhraseKind kind) {
-    switch (kind) {
-    case mixxx::PhraseKind::Intro:
-        return QColor(60, 120, 255);
-    case mixxx::PhraseKind::Buildup:
-        return QColor(255, 210, 0);
-    case mixxx::PhraseKind::Drop:
-        return QColor(255, 40, 40);
-    case mixxx::PhraseKind::Breakdown:
-        return QColor(40, 200, 120);
-    case mixxx::PhraseKind::Outro:
-        return QColor(160, 90, 255);
-    case mixxx::PhraseKind::Unknown:
-        break;
-    }
-    return QColor(150, 150, 150);
+    return mixxx::RgbColor::toQColor(mixxx::PhraseAnalyzer::sectionColor(kind));
 }
 
 } // namespace
@@ -188,11 +180,20 @@ bool WaveformRenderBeat::preprocessInner() {
         }
     }
 
+    if (!m_pBassClash) {
+        const ConfigKey bassClashKey(m_waveformRenderer->getGroup(), QStringLiteral("bass_clash"));
+        if (ControlObject::exists(bassClashKey)) {
+            m_pBassClash = std::make_unique<PollingControlProxy>(bassClashKey);
+        }
+    }
+    const bool bassClash = !m_isSlipRenderer && m_pBassClash && m_pBassClash->toBool();
+
     const int numBoxesPerBeat = (m_isSlipRenderer && splitStemTracks)
             ? mixxx::kMaxSupportedStems
             : 1;
     const int reserved = (numBeatsInRange * numBoxesPerBeat +
-                                 static_cast<int>(m_visibleSections.size())) *
+                                 static_cast<int>(m_visibleSections.size()) +
+                                 (bassClash ? 1 : 0)) *
             numVerticesPerLine;
     geometry().allocate(reserved);
 
@@ -204,6 +205,12 @@ bool WaveformRenderBeat::preprocessInner() {
         vertexUpdater.addRectangle({section.x1, rendererBreadth - bandHeight},
                 {section.x2, rendererBreadth},
                 section.color);
+    }
+    if (bassClash) {
+        vertexUpdater.addRectangle({0.f, 0.f},
+                {static_cast<float>(m_waveformRenderer->getLength()),
+                        std::round(rendererBreadth * kBassClashRelativeHeight)},
+                kBassClashColor);
     }
 
     const float boxBreadth = splitStemTracks

@@ -31,6 +31,7 @@
 #include "preferences/dialog/dlgprefdeck.h"
 #include "preferences/dialog/dlgprefeffects.h"
 #include "preferences/dialog/dlgprefinterface.h"
+#include "preferences/dialog/dlgprefmixassistant.h"
 #include "preferences/dialog/dlgprefmixer.h"
 #include "preferences/dialog/dlgprefwaveform.h"
 #include "util/cmdlineargs.h"
@@ -210,6 +211,12 @@ DlgPreferences::DlgPreferences(
                           new DlgPrefAutoDJ(this, m_pConfig),
                           new QTreeWidgetItem(contentsTreeWidget, QTreeWidgetItem::Type)),
             tr("Auto DJ"),
+            "ic_preferences_autodj.svg");
+
+    addPageWidget(PreferencesPage(
+                          new DlgPrefMixAssistant(this),
+                          new QTreeWidgetItem(contentsTreeWidget, QTreeWidgetItem::Type)),
+            tr("Mix Assistant"),
             "ic_preferences_autodj.svg");
 
 #ifdef __BROADCAST__

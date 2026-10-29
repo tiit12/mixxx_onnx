@@ -64,6 +64,33 @@ Keyboard shortcuts (en_US mapping): deck 1 Ctrl+Shift+A/S (bar), Q/W
 Manual corrections are stored with the track and are never overwritten by
 the analyzer.
 
+## Mix Assistant
+
+*Preferences → Mix Assistant* switches these features on and off (all on by
+default, persistent controls in the group `[MixAssistant]`):
+
+| Option | Control | Effect |
+|---|---|---|
+| Set the intro end and the outro start from the sections | `auto_intro_outro` | Auto DJ ("Full Intro + Outro") mixes phrase by phrase |
+| Create hotcues for the sections | `auto_hotcues` | Tracks without hotcues of the user get hotcues at the sections, labeled and colored like the sections |
+| Number of hotcues | `section_hotcues` | 1-8, e.g. the hotcue pads of the controller. With more sections, the most useful ones are chosen: first drop, first breakdown, last drop, outro, buildups |
+| Start decks on the next phrase | `play_on_phrase` | Play waits for the next phrase of the playing deck (green countdown); press play again to start immediately |
+| Warn if the bass of two decks clashes | `bass_clash_warning` | Red bar at the top of the waveforms while two decks play full bass |
+
+The cues are set during the analysis; cues and hotcues set by the user are
+never changed. The section cues move along when the beatgrid is adjusted or
+the downbeats are shifted. `[ChannelN],section_cues_reset` (keyboard
+Ctrl+Shift+X / Ctrl+Shift+H) places them again at the current sections.
+Hotcues, cues and Auto DJ always start immediately.
+
+The section hotcues are normal hotcues, i.e. the hotcue pads of controllers
+trigger them. The controls of this page are listed in the MIDI Learning
+Wizard under *Bars / Phrases*.
+
+Additional controls: `[ChannelN],play_on_phrase_armed`,
+`[ChannelN],play_on_phrase_countdown`, `[ChannelN],bass_clash`,
+`[ChannelN],section_bass` (bass level of the current section, 0-1).
+
 ## Waveform preferences
 
 - *Play marker hints → Beats until next phrase* (`[Waveform],UntilPhraseShowBeats`,

@@ -138,6 +138,9 @@ class EngineBuffer : public EngineObject {
 
     // Queues a new seek position. Use SEEK_EXACT or SEEK_STANDARD as seekType
     void queueNewPlaypos(mixxx::audio::FramePos newpos, enum SeekRequest seekType);
+    /// Starts playing immediately, also if "play on next phrase" of the
+    /// MixAssistant is enabled. Used for hotcues, cue previews, etc.
+    void setPlayBypassingPhraseLaunch();
     void requestSyncPhase();
     void requestEnableSync(bool enabled);
     void requestSyncMode(SyncMode mode);
@@ -255,6 +258,7 @@ class EngineBuffer : public EngineObject {
 
   public slots:
     void slotControlPlayRequest(double);
+    void slotPlayOnPhraseLaunch(double);
     void slotControlPlayFromStart(double);
     void slotControlJumpToStartAndStop(double);
     void slotControlStop(double);
@@ -431,6 +435,13 @@ class EngineBuffer : public EngineObject {
     ControlPushButton* m_pSlipButton;
 
     PollingControlProxy m_quantize;
+    // "Play on next phrase" of the MixAssistant: Pressing play arms the deck
+    // and the MixAssistant launches it at the next phrase of the playing deck.
+    PollingControlProxy m_playOnPhraseMode;
+    ControlObject* m_pPlayOnPhraseArmed;
+    ControlPushButton* m_pPlayOnPhraseLaunch;
+    // > 0 while starting to play without waiting for the next phrase
+    QAtomicInt m_phraseLaunchBypass;
     ControlPotmeter* m_playposSlider;
     ControlProxy* m_pSampleRate;
     ControlProxy* m_pKeylockEngine;

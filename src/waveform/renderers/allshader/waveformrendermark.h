@@ -81,7 +81,7 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
     void updateUntilMark(double playPosition, double markerPosition);
     void updateDigitsNodeForUntilMark(float x);
     void updateUntilPhrase(double playPosition);
-    void updateDigitsNodeForUntilPhrase(float x);
+    void updateDigitsNodeForUntilPhrase(DigitsRenderNode* pNode, int beats, float x);
     float getMaxHeightForText(float proportion) const;
     void updateRangeNode(rendergraph::GeometryNode* pNode,
             const QRectF& rect,
@@ -96,6 +96,8 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
     double m_currentBeatPosition;
     double m_nextBeatPosition;
     std::unique_ptr<ControlProxy> m_pTimeRemainingControl;
+    // Beats until an armed deck is launched by the MixAssistant
+    std::unique_ptr<ControlProxy> m_pPlayOnPhraseCountdown;
 
     bool m_isSlipRenderer;
 
@@ -108,6 +110,7 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
 
     DigitsRenderNode* m_pDigitsRenderNode{};
     DigitsRenderNode* m_pPhraseDigitsRenderNode{};
+    DigitsRenderNode* m_pLaunchDigitsRenderNode{};
 
     QColor m_playMarkerForegroundColor;
     QColor m_playMarkerBackgroundColor;

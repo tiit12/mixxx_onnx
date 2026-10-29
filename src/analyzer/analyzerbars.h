@@ -47,6 +47,27 @@ class AnalyzerBars : public Analyzer {
             double framesPerSecond,
             mixxx::audio::FramePos firstSound);
 
+    /// Moves the end of the intro and the start of the outro to the analyzed
+    /// sections and creates hotcues for the sections, if enabled. Cues set
+    /// by the user are not changed, and hotcues are only created for tracks
+    /// without hotcues. If there are more sections than `maxHotcues`, the
+    /// most useful ones are chosen (first drop, first breakdown, last drop,
+    /// outro, buildups), numbered in the order of the track.
+    static void setupCuesFromSections(Track* pTrack,
+            const mixxx::Beats& beats,
+            bool introAndOutro,
+            bool hotcues,
+            int maxHotcues = kMaxSectionHotcues);
+
+    /// The pads of most controllers
+    static constexpr int kMaxSectionHotcues = 8;
+
+    /// Removes the hotcues placed at the sections and places the cues again
+    /// at the current sections, according to the settings of the
+    /// MixAssistant. Also replaces the end of the intro and the start of the
+    /// outro.
+    static void resetCuesFromSections(Track* pTrack);
+
   private:
     QString modelPath() const;
     bool isNeuralDetectionAvailable() const;

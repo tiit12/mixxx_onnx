@@ -1,6 +1,7 @@
 #include "analyzer/analyzerbars.h"
 
 #include <QFileInfo>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -8,6 +9,7 @@
 
 #include "analyzer/analyzertrack.h"
 #include "analyzer/phraseanalyzer.h"
+#include "control/pollingcontrolproxy.h"
 #include "track/track.h"
 #include "util/logger.h"
 #ifdef __ONNXRUNTIME__
@@ -28,8 +30,10 @@ constexpr int kDownbeatSearchFrames = 2;
 
 // Increment if the results of the analysis change, to re-analyze the tracks
 const QString kFirstSoundAnalyzerVersion = QStringLiteral("first-sound-1");
-const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-4");
+const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-5");
 const QString kModelFile = QStringLiteral("models/beat_this_small.onnx");
+
+const QString kMixAssistantGroup = QStringLiteral("[MixAssistant]");
 
 mixxx::audio::FramePos firstSoundPosition(const Track& track) {
     const CuePointer pN60dBSound = track.findCueByType(mixxx::CueType::N60dBSound);
@@ -55,6 +59,105 @@ std::optional<int> firstBeatIndex(
 
 double sigmoid(double x) {
     return 1.0 / (1.0 + std::exp(-x));
+}
+
+bool isSectionHotcue(const CuePointer& pCue) {
+    if (pCue->getHotCue() == Cue::kNoHotCue) {
+        return false;
+    }
+    const QString label = pCue->getLabel();
+    for (const auto kind : {mixxx::PhraseKind::Unknown,
+                 mixxx::PhraseKind::Intro,
+                 mixxx::PhraseKind::Buildup,
+                 mixxx::PhraseKind::Drop,
+                 mixxx::PhraseKind::Breakdown,
+                 mixxx::PhraseKind::Outro}) {
+        if (label == mixxx::phraseKindName(kind)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Removes the hotcues placed by AnalyzerBars::setupCuesFromSections()
+void removeSectionHotcues(Track* pTrack) {
+    for (const CuePointer& pCue : pTrack->getCuePoints()) {
+        if (isSectionHotcue(pCue)) {
+            pTrack->removeCue(pCue);
+        }
+    }
+}
+
+bool isMixAssistantEnabled(const QString& item) {
+    // Missing in tests
+    return PollingControlProxy(kMixAssistantGroup, item, ControlFlag::AllowMissingOrInvalid)
+            .toBool();
+}
+
+int maxSectionHotcues() {
+    const auto value = static_cast<int>(PollingControlProxy(kMixAssistantGroup,
+            QStringLiteral("section_hotcues"),
+            ControlFlag::AllowMissingOrInvalid)
+                    .get());
+    return value > 0 ? std::min(value, AnalyzerBars::kMaxSectionHotcues)
+                     : AnalyzerBars::kMaxSectionHotcues;
+}
+
+/// Indices of the sections that get a hotcue, in the order of the track
+std::vector<std::size_t> chooseSectionsForHotcues(
+        const std::vector<mixxx::Phrase>& sections, int maxHotcues) {
+    std::vector<std::size_t> candidates;
+    for (std::size_t i = 0; i < sections.size(); ++i) {
+        // The start of the intro is the main cue
+        if (sections[i].kind != mixxx::PhraseKind::Intro) {
+            candidates.push_back(i);
+        }
+    }
+    if (static_cast<int>(candidates.size()) <= maxHotcues) {
+        return candidates;
+    }
+
+    std::vector<std::size_t> chosen;
+    const auto choose = [&](std::size_t index) {
+        if (static_cast<int>(chosen.size()) < maxHotcues &&
+                std::find(chosen.cbegin(), chosen.cend(), index) == chosen.cend()) {
+            chosen.push_back(index);
+        }
+    };
+    const auto findFirst = [&](mixxx::PhraseKind kind) {
+        return std::find_if(candidates.cbegin(), candidates.cend(), [&](std::size_t i) {
+            return sections[i].kind == kind;
+        });
+    };
+    const auto findLast = [&](mixxx::PhraseKind kind) {
+        return std::find_if(candidates.crbegin(), candidates.crend(), [&](std::size_t i) {
+            return sections[i].kind == kind;
+        });
+    };
+    if (const auto it = findFirst(mixxx::PhraseKind::Drop); it != candidates.cend()) {
+        choose(*it);
+    }
+    if (const auto it = findFirst(mixxx::PhraseKind::Breakdown); it != candidates.cend()) {
+        choose(*it);
+    }
+    if (const auto it = findLast(mixxx::PhraseKind::Drop); it != candidates.crend()) {
+        choose(*it);
+    }
+    if (const auto it = findFirst(mixxx::PhraseKind::Outro); it != candidates.cend()) {
+        choose(*it);
+    }
+    for (const auto kind : {mixxx::PhraseKind::Buildup,
+                 mixxx::PhraseKind::Drop,
+                 mixxx::PhraseKind::Breakdown,
+                 mixxx::PhraseKind::Unknown}) {
+        for (const std::size_t i : candidates) {
+            if (sections[i].kind == kind) {
+                choose(i);
+            }
+        }
+    }
+    std::sort(chosen.begin(), chosen.end());
+    return chosen;
 }
 
 } // namespace
@@ -176,7 +279,101 @@ void AnalyzerBars::storeResults(TrackPointer pTrack) {
     kLogger.debug() << "Bar anchor at beat" << pBarInfo->anchorBeat << "with"
                     << pBarInfo->phrases.size() << "sections by"
                     << pBarInfo->analyzerVersion;
-    pTrack->trySetBarInfo(std::move(pBarInfo));
+    if (!pTrack->trySetBarInfo(std::move(pBarInfo))) {
+        return;
+    }
+
+    const bool hotcues = isMixAssistantEnabled(QStringLiteral("auto_hotcues"));
+    if (hotcues) {
+        // Replace the hotcues of a previous analysis
+        removeSectionHotcues(pTrack.get());
+    }
+    setupCuesFromSections(pTrack.get(),
+            *pTrack->getBeats(),
+            isMixAssistantEnabled(QStringLiteral("auto_intro_outro")),
+            hotcues,
+            maxSectionHotcues());
+}
+
+// static
+void AnalyzerBars::resetCuesFromSections(Track* pTrack) {
+    const mixxx::BeatsPointer pBeats = pTrack->getBeats();
+    if (!pBeats || !pBeats->getBarInfo()) {
+        return;
+    }
+    const bool introAndOutro = isMixAssistantEnabled(QStringLiteral("auto_intro_outro"));
+    const bool hotcues = isMixAssistantEnabled(QStringLiteral("auto_hotcues"));
+    if (introAndOutro) {
+        const CuePointer pIntro = pTrack->findCueByType(mixxx::CueType::Intro);
+        if (pIntro) {
+            pIntro->setStartAndEndPosition(pIntro->getPosition(), mixxx::audio::kInvalidFramePos);
+        }
+        const CuePointer pOutro = pTrack->findCueByType(mixxx::CueType::Outro);
+        if (pOutro) {
+            pOutro->setStartAndEndPosition(mixxx::audio::kInvalidFramePos, pOutro->getEndPosition());
+        }
+    }
+    if (hotcues) {
+        removeSectionHotcues(pTrack);
+    }
+    setupCuesFromSections(pTrack, *pBeats, introAndOutro, hotcues, maxSectionHotcues());
+}
+
+// static
+void AnalyzerBars::setupCuesFromSections(Track* pTrack,
+        const mixxx::Beats& beats,
+        bool introAndOutro,
+        bool hotcues,
+        int maxHotcues) {
+    const mixxx::BarInfoPointer pBarInfo = beats.getBarInfo();
+    if (!pBarInfo || pBarInfo->phrases.size() < 2) {
+        return;
+    }
+    const auto& sections = pBarInfo->phrases;
+    const auto sectionStart = [&](const mixxx::Phrase& section) {
+        return *(beats.cfirstmarker() + section.startBeat);
+    };
+
+    if (introAndOutro) {
+        // The intro start and the outro end are set by AnalyzerSilence
+        if (sections.front().kind == mixxx::PhraseKind::Intro) {
+            const CuePointer pIntro = pTrack->findCueByType(mixxx::CueType::Intro);
+            const auto introEnd = sectionStart(sections[1]);
+            if (pIntro && !pIntro->getEndPosition().isValid() &&
+                    pIntro->getPosition() < introEnd) {
+                pIntro->setStartAndEndPosition(pIntro->getPosition(), introEnd);
+            }
+        }
+        if (sections.back().kind == mixxx::PhraseKind::Outro) {
+            const CuePointer pOutro = pTrack->findCueByType(mixxx::CueType::Outro);
+            const auto outroStart = sectionStart(sections.back());
+            if (pOutro && !pOutro->getPosition().isValid() &&
+                    (!pOutro->getEndPosition().isValid() ||
+                            outroStart < pOutro->getEndPosition())) {
+                pOutro->setStartAndEndPosition(outroStart, pOutro->getEndPosition());
+            }
+        }
+    }
+
+    if (hotcues) {
+        const QList<CuePointer> cues = pTrack->getCuePoints();
+        const bool hasHotcues = std::any_of(cues.cbegin(), cues.cend(), [](const CuePointer& pCue) {
+            return pCue->getHotCue() != Cue::kNoHotCue;
+        });
+        if (hasHotcues) {
+            return;
+        }
+        int hotcueIndex = 0;
+        for (const std::size_t sectionIndex : chooseSectionsForHotcues(sections, maxHotcues)) {
+            const mixxx::Phrase& section = sections[sectionIndex];
+            const CuePointer pCue = pTrack->createAndAddCue(mixxx::CueType::HotCue,
+                    hotcueIndex++,
+                    sectionStart(section),
+                    mixxx::audio::kInvalidFramePos,
+                    mixxx::PhraseAnalyzer::sectionColor(section.kind));
+            pCue->setLabel(mixxx::PhraseAnalyzer::sectionName(section.kind));
+        }
+    }
 }
 
 void AnalyzerBars::cleanup() {

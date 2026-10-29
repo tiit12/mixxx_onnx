@@ -1,5 +1,6 @@
 #include "engine/controls/bpmcontrol.h"
 
+#include "analyzer/analyzerbars.h"
 #include "control/controlencoder.h"
 #include "control/controllinpotmeter.h"
 #include "control/controlproxy.h"
@@ -296,6 +297,9 @@ BpmControl::BpmControl(const QString& group,
     m_pBeatsUntilPhrase->forceSet(-1);
     m_pPhraseKind = std::make_unique<ControlObject>(ConfigKey(group, "phrase_kind"));
     m_pPhraseKind->setReadOnly();
+    m_pSectionBass = std::make_unique<ControlObject>(ConfigKey(group, "section_bass"));
+    m_pSectionBass->setReadOnly();
+    m_pSectionBass->forceSet(-1);
 
     m_pBarShiftEarlier = std::make_unique<ControlPushButton>(
             ConfigKey(group, "bar_shift_earlier"), false);
@@ -345,6 +349,17 @@ BpmControl::BpmControl(const QString& group,
             [this](double value) {
                 if (value > 0) {
                     setBarAnchorToCurrentPosition();
+                }
+            });
+    m_pSectionCuesReset = std::make_unique<ControlPushButton>(
+            ConfigKey(group, "section_cues_reset"), false);
+    connect(m_pSectionCuesReset.get(),
+            &ControlObject::valueChanged,
+            this,
+            [this](double value) {
+                const TrackPointer pTrack = getEngineBuffer()->getLoadedTrack();
+                if (value > 0 && pTrack) {
+                    AnalyzerBars::resetCuesFromSections(pTrack.get());
                 }
             });
 }
@@ -1371,6 +1386,7 @@ void BpmControl::updateBarPosition(mixxx::audio::FramePos playpos) {
         m_pBarInPhrase->forceSet(0);
         m_pBeatsUntilPhrase->forceSet(-1);
         m_pPhraseKind->forceSet(0);
+        m_pSectionBass->forceSet(-1);
         return;
     }
     // The beat at or before the play position
@@ -1389,6 +1405,7 @@ void BpmControl::updateBarPosition(mixxx::audio::FramePos playpos) {
     m_pBarInPhrase->forceSet(beatInPhrase / pBarInfo->beatsPerBar + 1);
     m_pBeatsUntilPhrase->forceSet(phraseLength - beatInPhrase);
     m_pPhraseKind->forceSet(pPhrase ? static_cast<double>(pPhrase->kind) : 0);
+    m_pSectionBass->forceSet(pPhrase ? pPhrase->bass : -1);
 }
 
 void BpmControl::slotToggleBpmLock(double v) {

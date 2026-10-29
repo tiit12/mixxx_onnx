@@ -485,9 +485,82 @@ bool Track::setBeatsWhileLocked(mixxx::BeatsPointer pBeats) {
         }
     }
 
+    if (m_pBeats && pBeats) {
+        moveSectionCuesWhileLocked(*m_pBeats, *pBeats);
+    }
     m_pBeats = std::move(pBeats);
     m_record.refMetadata().refTrackInfo().setBpm(getBeatsPointerBpm(m_pBeats, getDuration()));
     return true;
+}
+
+void Track::moveSectionCuesWhileLocked(
+        const mixxx::Beats& oldBeats, const mixxx::Beats& newBeats) {
+    const mixxx::BarInfoPointer pOldBarInfo = oldBeats.getBarInfo();
+    const mixxx::BarInfoPointer pNewBarInfo = newBeats.getBarInfo();
+    if (!pOldBarInfo || !pNewBarInfo) {
+        return;
+    }
+    const auto& oldSections = pOldBarInfo->phrases;
+    const auto& newSections = pNewBarInfo->phrases;
+    // Only the positions of the same sections can change, e.g. by translating
+    // the beats or shifting the downbeats
+    if (oldSections.empty() || oldSections.size() != newSections.size()) {
+        return;
+    }
+    for (std::size_t i = 0; i < oldSections.size(); ++i) {
+        if (oldSections[i].kind != newSections[i].kind) {
+            return;
+        }
+    }
+    const auto sectionStart = [](const mixxx::Beats& beats, const mixxx::Phrase& section) {
+        return *(beats.cfirstmarker() + section.startBeat);
+    };
+    // Index of the section that starts at the position, or -1
+    const auto findSection = [&](mixxx::audio::FramePos position) {
+        if (!position.isValid()) {
+            return -1;
+        }
+        for (std::size_t i = 0; i < oldSections.size(); ++i) {
+            if (std::abs(position - sectionStart(oldBeats, oldSections[i])) < 1.0) {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    };
+
+    for (const CuePointer& pCue : std::as_const(m_cuePoints)) {
+        switch (pCue->getType()) {
+        case mixxx::CueType::HotCue: {
+            const int section = findSection(pCue->getPosition());
+            if (section >= 0 &&
+                    pCue->getLabel() == mixxx::phraseKindName(oldSections[section].kind)) {
+                pCue->setStartAndEndPosition(
+                        sectionStart(newBeats, newSections[section]),
+                        pCue->getEndPosition());
+            }
+            break;
+        }
+        case mixxx::CueType::Intro: {
+            const int section = findSection(pCue->getEndPosition());
+            if (section >= 0) {
+                pCue->setStartAndEndPosition(pCue->getPosition(),
+                        sectionStart(newBeats, newSections[section]));
+            }
+            break;
+        }
+        case mixxx::CueType::Outro: {
+            const int section = findSection(pCue->getPosition());
+            if (section >= 0) {
+                pCue->setStartAndEndPosition(
+                        sectionStart(newBeats, newSections[section]),
+                        pCue->getEndPosition());
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
 }
 
 bool Track::trySetBeatsWhileLocked(
