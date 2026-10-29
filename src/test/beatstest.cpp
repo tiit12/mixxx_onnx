@@ -653,43 +653,40 @@ TEST(BeatsTest, BarInfoDefaultPhrases) {
     EXPECT_TRUE(pBarInfo->isPhraseStart(-29));
     EXPECT_FALSE(pBarInfo->isPhraseStart(7));
     EXPECT_EQ(31, pBarInfo->beatInPhrase(2));
-    EXPECT_EQ(32, pBarInfo->phraseLengthBeats(100));
+    EXPECT_EQ(32, pBarInfo->beatsPerPhrase());
 }
 
 TEST(BeatsTest, BarInfoAnalyzedPhrases) {
     const auto pBarInfo = makeBarInfo(0,
             {Phrase{0, PhraseKind::Intro, 0.2f},
                     Phrase{64, PhraseKind::Drop, 1.f},
-                    Phrase{80, PhraseKind::Breakdown, 0.4f}});
-    // Before the first section, the phrases are counted from the anchor
+                    Phrase{112, PhraseKind::Breakdown, 0.4f}});
     EXPECT_EQ(nullptr, pBarInfo->findPhrase(-1));
     EXPECT_EQ(31, pBarInfo->beatInPhrase(-1));
-    // Sections consist of phrases of 32 beats
     EXPECT_EQ(PhraseKind::Intro, pBarInfo->findPhrase(63)->kind);
     EXPECT_EQ(31, pBarInfo->beatInPhrase(63));
-    EXPECT_EQ(32, pBarInfo->phraseLengthBeats(63));
     EXPECT_TRUE(pBarInfo->isPhraseStart(32));
     EXPECT_FALSE(pBarInfo->isSectionStart(32));
     EXPECT_TRUE(pBarInfo->isPhraseStart(64));
     EXPECT_TRUE(pBarInfo->isSectionStart(64));
-    // The phrase is cut short by the next section
-    EXPECT_EQ(PhraseKind::Drop, pBarInfo->findPhrase(70)->kind);
-    EXPECT_EQ(6, pBarInfo->beatInPhrase(70));
-    EXPECT_EQ(16, pBarInfo->phraseLengthBeats(70));
     // The last section lasts until the end of the track
     EXPECT_EQ(PhraseKind::Breakdown, pBarInfo->findPhrase(1000)->kind);
-    EXPECT_TRUE(pBarInfo->isPhraseStart(112));
-    EXPECT_EQ(32, pBarInfo->phraseLengthBeats(1000));
+    EXPECT_TRUE(pBarInfo->isSectionStart(112));
 }
 
-TEST(BeatsTest, BarInfoSectionShorterThanPhrase) {
+TEST(BeatsTest, BarInfoSectionWithinPhrase) {
+    // E.g. a buildup of 4 bars in front of a drop
     const auto pBarInfo = makeBarInfo(0,
-            {Phrase{0, PhraseKind::Intro, 0.f}, Phrase{40, PhraseKind::Drop, 1.f}});
-    // 40 beats = one phrase of 32 beats and one of 8 beats
-    EXPECT_EQ(32, pBarInfo->phraseLengthBeats(31));
-    EXPECT_EQ(3, pBarInfo->beatInPhrase(35));
-    EXPECT_EQ(8, pBarInfo->phraseLengthBeats(35));
-    EXPECT_EQ(0, pBarInfo->beatInPhrase(40));
+            {Phrase{0, PhraseKind::Intro, 0.f},
+                    Phrase{48, PhraseKind::Buildup, 0.5f},
+                    Phrase{64, PhraseKind::Drop, 1.f}});
+    // The phrases continue every 32 beats from the anchor
+    EXPECT_TRUE(pBarInfo->isSectionStart(48));
+    EXPECT_FALSE(pBarInfo->isPhraseStart(48));
+    EXPECT_EQ(PhraseKind::Buildup, pBarInfo->findPhrase(50)->kind);
+    EXPECT_EQ(18, pBarInfo->beatInPhrase(50));
+    EXPECT_TRUE(pBarInfo->isPhraseStart(64));
+    EXPECT_TRUE(pBarInfo->isPhraseStart(96));
 }
 
 TEST(BeatsTest, BarInfoSerializationRoundTrip) {

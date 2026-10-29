@@ -852,8 +852,7 @@ void allshader::WaveformRenderMark::updateUntilPhrase(double playPosition) {
         it--;
     }
     const int beatIndex = trackBeats->beatIndex(it);
-    m_beatsUntilPhrase = pBarInfo->phraseLengthBeats(beatIndex) -
-            pBarInfo->beatInPhrase(beatIndex);
+    m_beatsUntilPhrase = pBarInfo->beatsPerPhrase() - pBarInfo->beatInPhrase(beatIndex);
 }
 
 void allshader::WaveformRenderMark::updateDigitsNodeForUntilPhrase(

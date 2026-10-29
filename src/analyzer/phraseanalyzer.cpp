@@ -44,9 +44,12 @@ constexpr double kLoudestBarsPercentile = 0.95;
 /// Cost of each section in the segmentation, in squared units. Higher values
 /// result in fewer sections.
 constexpr double kSectionPenalty = 4.0;
-/// Additional costs for sections that are not a multiple of 8 bars and for
+/// Additional costs for sections that start within a phrase of 8 bars and for
 /// sections of 4 bars (except the first and the last section of the track).
-constexpr double kOddLengthPenalty = 2.0;
+/// Dance music is built of phrases, so a change within a phrase is usually
+/// only a fill or a fade, e.g. the drums dropping out in the last bars before
+/// a breakdown.
+constexpr double kOffPhrasePenalty = 6.0;
 constexpr double kShortSectionPenalty = 2.0;
 
 /// Sections above this relative energy with a strong bass are drops
@@ -141,8 +144,10 @@ Section makeSection(const std::vector<BarFeatures>& normalized,
 
 /// Splits the bars at the given candidate boundaries (bar indices,
 /// including 0 and the number of bars) into sections of minimal cost.
+/// The phrases start at the bars `phraseBar + n * kDefaultBarsPerPhrase`.
 std::vector<int> segment(const std::vector<SegmentFeatures>& weighted,
-        const std::vector<int>& boundaries) {
+        const std::vector<int>& boundaries,
+        int phraseBar) {
     const auto numBars = static_cast<int>(weighted.size());
     // Prefix sums for the sum of squared deviations from the section mean
     std::vector<SegmentFeatures> sum(numBars + 1, SegmentFeatures{});
@@ -161,13 +166,12 @@ std::vector<int> segment(const std::vector<SegmentFeatures>& weighted,
             const double featureSum = sum[endBar][feature] - sum[firstBar][feature];
             cost -= featureSum * featureSum / length;
         }
-        if (!isFirstOrLast) {
-            if (length % (2 * kBarsPerBlock) != 0) {
-                cost += kOddLengthPenalty;
-            }
-            if (length < 2 * kBarsPerBlock) {
-                cost += kShortSectionPenalty;
-            }
+        if (firstBar > 0 &&
+                BarInfo::positiveModulo(firstBar - phraseBar, kDefaultBarsPerPhrase) != 0) {
+            cost += kOffPhrasePenalty;
+        }
+        if (!isFirstOrLast && length < 2 * kBarsPerBlock) {
+            cost += kShortSectionPenalty;
         }
         return cost;
     };
@@ -363,7 +367,7 @@ std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
     if (boundaries.back() != numBars) {
         boundaries.push_back(numBars);
     }
-    const std::vector<int> sectionStarts = segment(weighted, boundaries);
+    const std::vector<int> sectionStarts = segment(weighted, boundaries, anchorBar);
 
     std::vector<Section> segmented;
     for (std::size_t i = 0; i < sectionStarts.size(); ++i) {

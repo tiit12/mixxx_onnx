@@ -1399,11 +1399,10 @@ void BpmControl::updateBarPosition(mixxx::audio::FramePos playpos) {
     }
     const int beatIndex = pBeats->beatIndex(it);
     const int beatInPhrase = pBarInfo->beatInPhrase(beatIndex);
-    const int phraseLength = pBarInfo->phraseLengthBeats(beatIndex);
     const mixxx::Phrase* pPhrase = pBarInfo->findPhrase(beatIndex);
     m_pBeatInBar->forceSet(pBarInfo->beatInBar(beatIndex) + 1);
     m_pBarInPhrase->forceSet(beatInPhrase / pBarInfo->beatsPerBar + 1);
-    m_pBeatsUntilPhrase->forceSet(phraseLength - beatInPhrase);
+    m_pBeatsUntilPhrase->forceSet(pBarInfo->beatsPerPhrase() - beatInPhrase);
     m_pPhraseKind->forceSet(pPhrase ? static_cast<double>(pPhrase->kind) : 0);
     m_pSectionBass->forceSet(pPhrase ? pPhrase->bass : -1);
 }

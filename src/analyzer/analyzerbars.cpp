@@ -30,7 +30,7 @@ constexpr int kDownbeatSearchFrames = 2;
 
 // Increment if the results of the analysis change, to re-analyze the tracks
 const QString kFirstSoundAnalyzerVersion = QStringLiteral("first-sound-1");
-const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-5");
+const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-6");
 const QString kModelFile = QStringLiteral("models/beat_this_small.onnx");
 
 const QString kMixAssistantGroup = QStringLiteral("[MixAssistant]");

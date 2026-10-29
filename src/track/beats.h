@@ -69,9 +69,8 @@ enum class PhraseKind {
 QString phraseKindName(PhraseKind kind);
 
 /// An analyzed section of a track (intro, drop, ...), which lasts until the
-/// start of the next section (or the end of the track). It consists of one or
-/// more phrases of `kDefaultBarsPerPhrase` bars, the last of which may be
-/// shorter.
+/// start of the next section (or the end of the track). Sections usually
+/// start with a phrase, but they don't change the phrases, see `BarInfo`.
 struct Phrase {
     /// Beat index relative to the first beat marker.
     int startBeat = 0;
@@ -102,8 +101,10 @@ class BarInfo {
     Source source = Source::Analyzer;
     /// Identifies the algorithm that produced the analyzer results.
     QString analyzerVersion;
-    /// Analyzed sections, sorted by start beat. The phrases are counted from
-    /// the start of each section, or from `anchorBeat` outside of sections.
+    /// Analyzed sections, sorted by start beat. The phrases of
+    /// `kDefaultBarsPerPhrase` bars are counted from `anchorBeat` through the
+    /// whole track, so that a section starting within a phrase (e.g. a short
+    /// buildup) does not shift the following phrases.
     std::vector<Phrase> phrases;
 
     /// Zero-based position of the beat within its bar.
@@ -119,12 +120,14 @@ class BarInfo {
     /// have been analyzed or the beat lies before the first section.
     const Phrase* findPhrase(int beatIndex) const;
 
-    /// Zero-based position of the beat within its phrase.
-    int beatInPhrase(int beatIndex) const;
+    int beatsPerPhrase() const {
+        return beatsPerBar * kDefaultBarsPerPhrase;
+    }
 
-    /// Number of beats of the phrase containing the beat. This is less than
-    /// the default phrase length if the next section starts earlier.
-    int phraseLengthBeats(int beatIndex) const;
+    /// Zero-based position of the beat within its phrase.
+    int beatInPhrase(int beatIndex) const {
+        return positiveModulo(beatIndex - anchorBeat, beatsPerPhrase());
+    }
 
     bool isPhraseStart(int beatIndex) const {
         return beatInPhrase(beatIndex) == 0;
@@ -141,11 +144,6 @@ class BarInfo {
     static int positiveModulo(int value, int divisor) {
         const int result = value % divisor;
         return result < 0 ? result + divisor : result;
-    }
-
-  private:
-    int defaultBeatsPerPhrase() const {
-        return beatsPerBar * kDefaultBarsPerPhrase;
     }
 };
 
