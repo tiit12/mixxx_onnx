@@ -155,6 +155,14 @@ void WaveformRendererSignalBase::setup(const QDomNode& node,
     setLowVisualGain(pWaveformFactory->getVisualGain(BandIndex::Low));
     setMidVisualGain(pWaveformFactory->getVisualGain(BandIndex::Mid));
     setHighVisualGain(pWaveformFactory->getVisualGain(BandIndex::High));
+
+    connect(pWaveformFactory,
+            &WaveformWidgetFactory::eqAffectsWaveformChanged,
+            this,
+            [this](bool eqAffectsWaveform) {
+                m_eqAffectsWaveform = eqAffectsWaveform;
+            });
+    m_eqAffectsWaveform = pWaveformFactory->getEqAffectsWaveform();
 }
 
 void WaveformRendererSignalBase::getGains(float* pAllGain,
@@ -174,7 +182,8 @@ void WaveformRendererSignalBase::getGains(float* pAllGain,
 
         // Only adjust low/mid/high gains if EQs are enabled or if there is no EQs CO setup.
         if (!m_pEQEnabled || m_pEQEnabled->get() > 0.0) {
-            if (m_pLowFilterControlObject &&
+            if (m_eqAffectsWaveform &&
+                    m_pLowFilterControlObject &&
                     m_pMidFilterControlObject &&
                     m_pHighFilterControlObject) {
                 lowVisualGain = static_cast<CSAMPLE_GAIN>(m_pLowFilterControlObject->get());
@@ -186,16 +195,18 @@ void WaveformRendererSignalBase::getGains(float* pAllGain,
             midVisualGain *= m_midVisualGain;
             highVisualGain *= m_highVisualGain;
 
-            if (m_pLowKillControlObject && m_pLowKillControlObject->get() > 0.0) {
-                lowVisualGain = 0;
-            }
+            if (m_eqAffectsWaveform) {
+                if (m_pLowKillControlObject && m_pLowKillControlObject->get() > 0.0) {
+                    lowVisualGain = 0;
+                }
 
-            if (m_pMidKillControlObject && m_pMidKillControlObject->get() > 0.0) {
-                midVisualGain = 0;
-            }
+                if (m_pMidKillControlObject && m_pMidKillControlObject->get() > 0.0) {
+                    midVisualGain = 0;
+                }
 
-            if (m_pHighKillControlObject && m_pHighKillControlObject->get() > 0.0) {
-                highVisualGain = 0;
+                if (m_pHighKillControlObject && m_pHighKillControlObject->get() > 0.0) {
+                    highVisualGain = 0;
+                }
             }
         }
 

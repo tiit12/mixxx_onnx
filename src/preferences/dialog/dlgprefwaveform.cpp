@@ -292,6 +292,12 @@ DlgPrefWaveform::DlgPrefWaveform(
             &QCheckBox::toggled,
             this,
             &DlgPrefWaveform::slotSetUntilPhraseShowBeats);
+    connect(eqAffectsWaveformCheckBox,
+            &QCheckBox::toggled,
+            this,
+            [](bool checked) {
+                WaveformWidgetFactory::instance()->setEqAffectsWaveform(checked);
+            });
     connect(untilMarkAlignComboBox,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             this,
@@ -407,6 +413,7 @@ void DlgPrefWaveform::slotUpdate() {
     playMarkerPositionSlider->setValue(static_cast<int>(pFactory->getPlayMarkerPosition() * 100));
     beatGridAlphaSpinBox->setValue(pFactory->getBeatGridAlpha());
     beatGridAlphaSlider->setValue(pFactory->getBeatGridAlpha());
+    eqAffectsWaveformCheckBox->setChecked(pFactory->getEqAffectsWaveform());
 
     untilMarkShowBeatsCheckBox->setChecked(pFactory->getUntilMarkShowBeats());
     untilMarkShowTimeCheckBox->setChecked(pFactory->getUntilMarkShowTime());
@@ -500,6 +507,8 @@ void DlgPrefWaveform::slotResetToDefaults() {
     lowVisualGain->setValue(WaveformWidgetFactory::getVisualGainDefault(BandIndex::Low));
     midVisualGain->setValue(WaveformWidgetFactory::getVisualGainDefault(BandIndex::Mid));
     highVisualGain->setValue(WaveformWidgetFactory::getVisualGainDefault(BandIndex::High));
+    eqAffectsWaveformCheckBox->setChecked(true);
+    untilPhraseShowBeatsCheckBox->setChecked(true);
 
     // Default zoom level is 3 in WaveformWidgetFactory.
     defaultZoomComboBox->setCurrentIndex(3 + 1);

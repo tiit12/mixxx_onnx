@@ -62,7 +62,16 @@ Keyboard shortcuts (en_US mapping): deck 1 Ctrl+Shift+A/S (bar), Q/W
 (phrase), Z (set here); deck 2 Ctrl+Shift+J/K, I/P, M.
 
 Manual corrections are stored with the track and are never overwritten by
-the analyzer. The colors can be changed in the skin with `BarColor` and
+the analyzer.
+
+## Waveform preferences
+
+- *Play marker hints → Beats until next phrase* (`[Waveform],UntilPhraseShowBeats`,
+  default on): orange countdown next to the play marker, 32 … 1 beats until
+  the next phrase start. Requires an OpenGL waveform type.
+- *Visual gain → Equalizer changes the waveform* (`[Waveform],EqAffectsWaveform`,
+  default on): if disabled, the EQ knobs and kill switches only change the
+  sound and the waveform always shows the original track. The colors can be changed in the skin with `BarColor` and
 `PhraseColor` next to `BeatColor`.
 
 ## Model and test data

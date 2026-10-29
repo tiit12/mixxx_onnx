@@ -139,6 +139,7 @@ WaveformWidgetFactory::WaveformWidgetFactory()
           m_untilMarkShowBeats(false),
           m_untilMarkShowTime(false),
           m_untilPhraseShowBeats(true),
+          m_eqAffectsWaveform(true),
           m_untilMarkAlign(Qt::AlignVCenter),
           m_untilMarkTextPointSize(24),
           m_untilMarkTextHeightLimit(toUntilMarkTextHeightLimit(0)),
@@ -480,6 +481,16 @@ bool WaveformWidgetFactory::setConfig(UserSettingsPointer config) {
     } else {
         m_config->setValue(ConfigKey(kWaveformGroup, QStringLiteral("UntilPhraseShowBeats")),
                 m_untilPhraseShowBeats);
+    }
+    int eqAffectsWaveform =
+            m_config->getValueString(
+                            ConfigKey(kWaveformGroup, QStringLiteral("EqAffectsWaveform")))
+                    .toInt(&ok);
+    if (ok) {
+        setEqAffectsWaveform(static_cast<bool>(eqAffectsWaveform));
+    } else {
+        m_config->setValue(ConfigKey(kWaveformGroup, QStringLiteral("EqAffectsWaveform")),
+                m_eqAffectsWaveform);
     }
 
     setUntilMarkAlign(toUntilMarkAlign(
@@ -1655,6 +1666,15 @@ void WaveformWidgetFactory::setUntilPhraseShowBeats(bool value) {
                 m_untilPhraseShowBeats);
     }
     emit untilPhraseShowBeatsChanged(value);
+}
+
+void WaveformWidgetFactory::setEqAffectsWaveform(bool value) {
+    m_eqAffectsWaveform = value;
+    if (m_config) {
+        m_config->setValue(ConfigKey(kWaveformGroup, QStringLiteral("EqAffectsWaveform")),
+                m_eqAffectsWaveform);
+    }
+    emit eqAffectsWaveformChanged(value);
 }
 
 void WaveformWidgetFactory::setUntilMarkAlign(Qt::Alignment align) {

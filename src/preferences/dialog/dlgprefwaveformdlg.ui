@@ -466,6 +466,16 @@ Select from different types of displays for the waveform, which differ primarily
          </property>
         </widget>
        </item>
+       <item row="2" column="0" colspan="4">
+        <widget class="QCheckBox" name="eqAffectsWaveformCheckBox">
+         <property name="toolTip">
+          <string>If disabled, the equalizer and its kill switches only change the sound, the waveform always shows the original track.</string>
+         </property>
+         <property name="text">
+          <string>Equalizer changes the waveform</string>
+         </property>
+        </widget>
+       </item>
       </layout>
      </item>
 
@@ -932,6 +942,7 @@ Select from different types of displays for the waveform overview, which differ 
   <tabstop>lowVisualGain</tabstop>
   <tabstop>midVisualGain</tabstop>
   <tabstop>highVisualGain</tabstop>
+  <tabstop>eqAffectsWaveformCheckBox</tabstop>
   <tabstop>untilMarkShowBeatsCheckBox</tabstop>
   <tabstop>untilMarkShowTimeCheckBox</tabstop>
   <tabstop>untilPhraseShowBeatsCheckBox</tabstop>

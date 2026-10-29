@@ -72,6 +72,8 @@ class WaveformRendererSignalBase : public QObject, public WaveformRendererAbstra
     CSAMPLE_GAIN m_lowVisualGain;
     CSAMPLE_GAIN m_midVisualGain;
     CSAMPLE_GAIN m_highVisualGain;
+    // If false, only the visual gains are applied, but not the equalizer
+    bool m_eqAffectsWaveform{true};
 
     float m_axesColor_r, m_axesColor_g, m_axesColor_b, m_axesColor_a;
     float m_signalColor_r, m_signalColor_g, m_signalColor_b;

@@ -181,6 +181,7 @@ class WaveformWidgetFactory : public QObject,
     void setUntilMarkShowBeats(bool value);
     void setUntilMarkShowTime(bool value);
     void setUntilPhraseShowBeats(bool value);
+    void setEqAffectsWaveform(bool value);
     void setUntilMarkAlign(Qt::Alignment align);
     void setUntilMarkTextPointSize(int value);
     void setUntilMarkTextHeightLimit(float value);
@@ -198,6 +199,10 @@ class WaveformWidgetFactory : public QObject,
     }
     bool getUntilPhraseShowBeats() const {
         return m_untilPhraseShowBeats;
+    }
+    /// If false, the equalizer knobs and kill switches don't change the waveform
+    bool getEqAffectsWaveform() const {
+        return m_eqAffectsWaveform;
     }
     Qt::Alignment getUntilMarkAlign() const {
         return m_untilMarkAlign;
@@ -304,6 +309,7 @@ class WaveformWidgetFactory : public QObject,
     void untilMarkShowBeatsChanged(bool value);
     void untilMarkShowTimeChanged(bool value);
     void untilPhraseShowBeatsChanged(bool value);
+    void eqAffectsWaveformChanged(bool value);
     void untilMarkAlignChanged(Qt::Alignment align);
     void untilMarkTextPointSizeChanged(int value);
     void untilMarkTextHeightLimitChanged(float value);
@@ -376,6 +382,7 @@ class WaveformWidgetFactory : public QObject,
     bool m_untilMarkShowBeats;
     bool m_untilMarkShowTime;
     bool m_untilPhraseShowBeats;
+    bool m_eqAffectsWaveform;
     Qt::Alignment m_untilMarkAlign;
     int m_untilMarkTextPointSize;
     float m_untilMarkTextHeightLimit;
