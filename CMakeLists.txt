@@ -1207,6 +1207,7 @@ add_library(
   src/analyzer/analyzerkey.cpp
   src/analyzer/analyzerscheduledtrack.cpp
   src/analyzer/analyzersilence.cpp
+  src/analyzer/phraseanalyzer.cpp
   src/analyzer/analyzerthread.cpp
   src/analyzer/analyzertrack.cpp
   src/analyzer/analyzerwaveform.cpp
@@ -2932,6 +2933,7 @@ if(BUILD_TESTING)
     src/test/beatgridtest.cpp
     src/test/beatmaptest.cpp
     src/test/beatstest.cpp
+    src/test/phraseanalyzertest.cpp
     src/test/beatstranslatetest.cpp
     src/test/borrowabletest.cpp
     src/test/bpmtest.cpp

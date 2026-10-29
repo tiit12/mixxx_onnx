@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "analyzer/analyzertrack.h"
+#include "analyzer/phraseanalyzer.h"
 #include "track/track.h"
 #include "util/logger.h"
 #ifdef __ONNXRUNTIME__
@@ -27,7 +28,7 @@ constexpr int kDownbeatSearchFrames = 2;
 
 // Increment if the results of the analysis change, to re-analyze the tracks
 const QString kFirstSoundAnalyzerVersion = QStringLiteral("first-sound-1");
-const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-1");
+const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-4");
 const QString kModelFile = QStringLiteral("models/beat_this_small.onnx");
 
 mixxx::audio::FramePos firstSoundPosition(const Track& track) {
@@ -76,18 +77,14 @@ bool AnalyzerBars::isNeuralDetectionAvailable() const {
 #endif
 }
 
+QString AnalyzerBars::currentAnalyzerVersion() const {
+    return isNeuralDetectionAvailable() ? kNeuralAnalyzerVersion : kFirstSoundAnalyzerVersion;
+}
+
 bool AnalyzerBars::hasCurrentBarInfo(const mixxx::Beats& beats) const {
     const mixxx::BarInfoPointer pBarInfo = beats.getBarInfo();
-    if (!pBarInfo) {
-        return false;
-    }
-    if (pBarInfo->source == mixxx::BarInfo::Source::User) {
-        // Never overwrite manual adjustments
-        return true;
-    }
-    return pBarInfo->analyzerVersion ==
-            (isNeuralDetectionAvailable() ? kNeuralAnalyzerVersion
-                                          : kFirstSoundAnalyzerVersion);
+    // Manually adjusted downbeats are kept when re-analyzing, see storeResults()
+    return pBarInfo && pBarInfo->analyzerVersion == currentAnalyzerVersion();
 }
 
 bool AnalyzerBars::initialize(const AnalyzerTrack& track,
@@ -134,23 +131,51 @@ void AnalyzerBars::storeResults(TrackPointer pTrack) {
         return;
     }
 
-    mixxx::BarInfoPointer pBarInfo;
+    const mixxx::BarInfoPointer pUserBarInfo =
+            pBeats->getBarInfo() &&
+                    pBeats->getBarInfo()->source == mixxx::BarInfo::Source::User
+            ? pBeats->getBarInfo()
+            : nullptr;
 #ifdef __ONNXRUNTIME__
-    if (m_pDetector && m_pDetector->finalize()) {
-        pBarInfo = barInfoFromDownbeatLogits(*pBeats,
-                m_pDetector->downbeatLogits(),
-                mixxx::DownbeatDetector::kFramesPerSecond,
-                firstSoundPosition(*pTrack));
+    const bool detected = m_pDetector && m_pDetector->finalize();
+#else
+    const bool detected = false;
+#endif
+
+    std::shared_ptr<mixxx::BarInfo> pBarInfo;
+    if (pUserBarInfo) {
+        // Keep the manually adjusted downbeats
+        pBarInfo = std::make_shared<mixxx::BarInfo>(*pUserBarInfo);
+        pBarInfo->phrases.clear();
+        pBarInfo->analyzerVersion = detected ? kNeuralAnalyzerVersion : kFirstSoundAnalyzerVersion;
+    } else {
+        mixxx::BarInfoPointer pDetected;
+#ifdef __ONNXRUNTIME__
+        if (detected) {
+            pDetected = barInfoFromDownbeatLogits(*pBeats,
+                    m_pDetector->downbeatLogits(),
+                    mixxx::DownbeatDetector::kFramesPerSecond,
+                    firstSoundPosition(*pTrack));
+        }
+#endif
+        if (!pDetected) {
+            pDetected = guessBarInfoFromFirstSound(*pTrack);
+        }
+        if (!pDetected) {
+            return;
+        }
+        pBarInfo = std::make_shared<mixxx::BarInfo>(*pDetected);
+    }
+
+#ifdef __ONNXRUNTIME__
+    if (detected) {
+        pBarInfo->phrases = mixxx::PhraseAnalyzer::analyze(
+                *pBeats, *pBarInfo, m_pDetector->bandEnergies());
     }
 #endif
-    if (!pBarInfo) {
-        pBarInfo = guessBarInfoFromFirstSound(*pTrack);
-    }
-    if (!pBarInfo) {
-        return;
-    }
-    kLogger.debug() << "Bar anchor at beat" << pBarInfo->anchorBeat
-                    << "by" << pBarInfo->analyzerVersion;
+    kLogger.debug() << "Bar anchor at beat" << pBarInfo->anchorBeat << "with"
+                    << pBarInfo->phrases.size() << "sections by"
+                    << pBarInfo->analyzerVersion;
     pTrack->trySetBarInfo(std::move(pBarInfo));
 }
 

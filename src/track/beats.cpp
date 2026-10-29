@@ -121,22 +121,23 @@ const Phrase* BarInfo::findPhrase(int beatIndex) const {
 
 int BarInfo::beatInPhrase(int beatIndex) const {
     const Phrase* pPhrase = findPhrase(beatIndex);
-    if (pPhrase) {
-        return beatIndex - pPhrase->startBeat;
-    }
-    return positiveModulo(beatIndex - anchorBeat, defaultBeatsPerPhrase());
+    const int origin = pPhrase ? pPhrase->startBeat : anchorBeat;
+    return positiveModulo(beatIndex - origin, defaultBeatsPerPhrase());
 }
 
 int BarInfo::phraseLengthBeats(int beatIndex) const {
-    const Phrase* pPhrase = findPhrase(beatIndex);
-    if (!pPhrase) {
-        return defaultBeatsPerPhrase();
+    const int phraseStart = beatIndex - beatInPhrase(beatIndex);
+    const auto nextSection = std::upper_bound(phrases.cbegin(),
+            phrases.cend(),
+            beatIndex,
+            [](int index, const Phrase& phrase) {
+                return index < phrase.startBeat;
+            });
+    if (nextSection != phrases.cend() &&
+            nextSection->startBeat < phraseStart + defaultBeatsPerPhrase()) {
+        return nextSection->startBeat - phraseStart;
     }
-    const auto next = std::next(phrases.cbegin(), (pPhrase - phrases.data()) + 1);
-    if (next == phrases.cend()) {
-        return -1;
-    }
-    return next->startBeat - pPhrase->startBeat;
+    return defaultBeatsPerPhrase();
 }
 
 BarInfo BarInfo::scaled(double scaleFactor) const {

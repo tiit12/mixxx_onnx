@@ -25,6 +25,14 @@ constexpr int kChunkStep = DownbeatDetector::kChunkFrames - 2 * DownbeatDetector
 // Samples in front of the signal that are needed for the STFT
 constexpr SINT kSignalMargin = DownbeatDetector::kFftSize;
 
+// Upper limits of the low and mid band of BandEnergies
+constexpr double kLowBandMaxHz = 150;
+constexpr double kMidBandMaxHz = 2000;
+constexpr double kHzPerBin = static_cast<double>(DownbeatDetector::kSampleRate) /
+        DownbeatDetector::kFftSize;
+constexpr int kLowBandEndBin = static_cast<int>(kLowBandMaxHz / kHzPerBin) + 1;
+constexpr int kMidBandEndBin = static_cast<int>(kMidBandMaxHz / kHzPerBin) + 1;
+
 Ort::Env& ortEnv() {
     static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "mixxx");
     return env;
@@ -113,6 +121,21 @@ bool DownbeatDetector::initialize(const QString& modelPath,
     }
     m_fftIn.resize(kFftSize);
     m_fftOut.resize(kFftSize);
+    m_bandEnergies.framesPerSecond = kFramesPerSecond;
+    m_spectrumBandOfBin.resize(kNumBins);
+    for (int bin = 0; bin < kNumBins; ++bin) {
+        const double hz = bin * kHzPerBin;
+        if (hz < BandEnergies::kSpectrumMinHz || hz >= BandEnergies::kSpectrumMaxHz) {
+            m_spectrumBandOfBin[bin] = -1;
+            continue;
+        }
+        // Logarithmically spaced bands
+        m_spectrumBandOfBin[bin] = std::min(BandEnergies::kNumSpectrumBands - 1,
+                static_cast<int>(BandEnergies::kNumSpectrumBands *
+                        std::log(hz / BandEnergies::kSpectrumMinHz) /
+                        std::log(BandEnergies::kSpectrumMaxHz /
+                                BandEnergies::kSpectrumMinHz)));
+    }
     m_chunk.resize(static_cast<std::size_t>(kChunkFrames) * kNumBins);
     return true;
 }
@@ -183,9 +206,26 @@ void DownbeatDetector::computeFrames() {
         m_pFft->forwardMagnitude(m_fftIn.data(), m_fftOut.data());
         // torchaudio Spectrogram(normalized="frame_length")
         const double norm = 1.0 / std::sqrt(static_cast<double>(kFftSize));
+        std::array<double, 3> bandPower{};
+        std::array<float, BandEnergies::kNumSpectrumBands> spectrum{};
         for (int bin = 0; bin < kNumBins; ++bin) {
-            m_frames.push_back(static_cast<float>(m_fftOut[bin] * norm));
+            const double magnitude = m_fftOut[bin] * norm;
+            m_frames.push_back(static_cast<float>(magnitude));
+            // Skip the DC bin
+            if (bin > 0) {
+                const double power = magnitude * magnitude;
+                const int band = bin < kLowBandEndBin ? 0 : (bin < kMidBandEndBin ? 1 : 2);
+                bandPower[band] += power;
+                const int spectrumBand = m_spectrumBandOfBin[bin];
+                if (spectrumBand >= 0) {
+                    spectrum[spectrumBand] += static_cast<float>(power);
+                }
+            }
         }
+        m_bandEnergies.low.push_back(static_cast<float>(bandPower[0]));
+        m_bandEnergies.mid.push_back(static_cast<float>(bandPower[1]));
+        m_bandEnergies.high.push_back(static_cast<float>(bandPower[2]));
+        m_bandEnergies.spectrum.push_back(spectrum);
         m_numFrames++;
     }
 

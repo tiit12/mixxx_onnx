@@ -65,7 +65,10 @@ enum class PhraseKind {
     Outro,
 };
 
-/// A phrase lasts until the start of the next phrase (or the end of the track).
+/// An analyzed section of a track (intro, drop, ...), which lasts until the
+/// start of the next section (or the end of the track). It consists of one or
+/// more phrases of `kDefaultBarsPerPhrase` bars, the last of which may be
+/// shorter.
 struct Phrase {
     /// Beat index relative to the first beat marker.
     int startBeat = 0;
@@ -93,8 +96,8 @@ class BarInfo {
     Source source = Source::Analyzer;
     /// Identifies the algorithm that produced the analyzer results.
     QString analyzerVersion;
-    /// Analyzed phrases, sorted by start beat. If empty, phrases of
-    /// `kDefaultBarsPerPhrase` bars starting at `anchorBeat` are assumed.
+    /// Analyzed sections, sorted by start beat. The phrases are counted from
+    /// the start of each section, or from `anchorBeat` outside of sections.
     std::vector<Phrase> phrases;
 
     /// Zero-based position of the beat within its bar.
@@ -106,19 +109,24 @@ class BarInfo {
         return beatInBar(beatIndex) == 0;
     }
 
-    /// Returns the phrase containing the beat, or nullptr if no phrases have
-    /// been analyzed or the beat lies before the first phrase.
+    /// Returns the section containing the beat, or nullptr if no sections
+    /// have been analyzed or the beat lies before the first section.
     const Phrase* findPhrase(int beatIndex) const;
 
     /// Zero-based position of the beat within its phrase.
     int beatInPhrase(int beatIndex) const;
 
-    /// Number of beats of the phrase containing the beat. Returns -1 for
-    /// the open-ended last analyzed phrase.
+    /// Number of beats of the phrase containing the beat. This is less than
+    /// the default phrase length if the next section starts earlier.
     int phraseLengthBeats(int beatIndex) const;
 
     bool isPhraseStart(int beatIndex) const {
         return beatInPhrase(beatIndex) == 0;
+    }
+
+    bool isSectionStart(int beatIndex) const {
+        const Phrase* pPhrase = findPhrase(beatIndex);
+        return pPhrase && pPhrase->startBeat == beatIndex;
     }
 
     /// Returns a copy with all beat indices multiplied by `scaleFactor`.

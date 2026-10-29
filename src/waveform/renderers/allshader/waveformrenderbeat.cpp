@@ -23,8 +23,32 @@ namespace {
 const QColor kDefaultBarColor = QColor(255, 255, 255);
 const QColor kDefaultPhraseColor = QColor(255, 96, 0);
 
+// Height of the colored section band at the bottom of the waveform
+constexpr float kSectionBandMinHeight = 4.f;
+constexpr float kSectionBandRelativeHeight = 0.05f;
+constexpr float kSectionBandAlpha = 0.85f;
+constexpr float kSectionStartWidth = 4.f;
+
 QVector4D toVector4D(const QColor& color, float alpha) {
     return QVector4D(color.redF(), color.greenF(), color.blueF(), alpha);
+}
+
+QColor sectionColor(mixxx::PhraseKind kind) {
+    switch (kind) {
+    case mixxx::PhraseKind::Intro:
+        return QColor(60, 120, 255);
+    case mixxx::PhraseKind::Buildup:
+        return QColor(255, 210, 0);
+    case mixxx::PhraseKind::Drop:
+        return QColor(255, 40, 40);
+    case mixxx::PhraseKind::Breakdown:
+        return QColor(40, 200, 120);
+    case mixxx::PhraseKind::Outro:
+        return QColor(160, 90, 255);
+    case mixxx::PhraseKind::Unknown:
+        break;
+    }
+    return QColor(150, 150, 150);
 }
 
 } // namespace
@@ -136,19 +160,56 @@ bool WaveformRenderBeat::preprocessInner() {
         numBeatsInRange++;
     }
 
+    const mixxx::BarInfoPointer pBarInfo = trackBeats->getBarInfo();
+
+    // Analyzed sections in the visible range, drawn as a colored band at the
+    // bottom of the waveform
+    m_visibleSections.clear();
+    if (pBarInfo && !m_isSlipRenderer) {
+        const auto trackEnd = mixxx::audio::FramePos::fromEngineSamplePos(trackSamples);
+        const auto& sections = pBarInfo->phrases;
+        for (std::size_t i = 0; i < sections.size(); ++i) {
+            const auto sectionStart = *(trackBeats->cfirstmarker() + sections[i].startBeat);
+            const auto sectionEnd = i + 1 < sections.size()
+                    ? *(trackBeats->cfirstmarker() + sections[i + 1].startBeat)
+                    : trackEnd;
+            if (sectionEnd < startPosition || sectionStart > endPosition) {
+                continue;
+            }
+            const auto toX = [&](mixxx::audio::FramePos position) {
+                const double x = m_waveformRenderer->transformSamplePositionInRendererWorld(
+                        position.toEngineSamplePos(), positionType);
+                return static_cast<float>(std::clamp(
+                        x, -1.0, static_cast<double>(m_waveformRenderer->getLength()) + 1.0));
+            };
+            m_visibleSections.push_back(VisibleSection{toX(sectionStart),
+                    toX(sectionEnd),
+                    toVector4D(sectionColor(sections[i].kind), kSectionBandAlpha)});
+        }
+    }
+
     const int numBoxesPerBeat = (m_isSlipRenderer && splitStemTracks)
             ? mixxx::kMaxSupportedStems
             : 1;
-    const int reserved = numBeatsInRange * numVerticesPerLine * numBoxesPerBeat;
+    const int reserved = (numBeatsInRange * numBoxesPerBeat +
+                                 static_cast<int>(m_visibleSections.size())) *
+            numVerticesPerLine;
     geometry().allocate(reserved);
 
     RGBAVertexUpdater vertexUpdater{geometry().vertexDataAs<Geometry::RGBAColoredPoint2D>()};
+
+    const float bandHeight = std::max(kSectionBandMinHeight,
+            std::round(rendererBreadth * kSectionBandRelativeHeight));
+    for (const auto& section : m_visibleSections) {
+        vertexUpdater.addRectangle({section.x1, rendererBreadth - bandHeight},
+                {section.x2, rendererBreadth},
+                section.color);
+    }
 
     const float boxBreadth = splitStemTracks
             ? rendererBreadth / static_cast<float>(mixxx::kMaxSupportedStems)
             : rendererBreadth;
 
-    const mixxx::BarInfoPointer pBarInfo = trackBeats->getBarInfo();
     const float beatAlpha = static_cast<float>(m_color.alphaF());
     const QVector4D beatColor = toVector4D(m_color, beatAlpha);
     const QVector4D barColor = toVector4D(m_barColor, std::min(1.f, beatAlpha * 1.5f + 0.1f));
@@ -167,7 +228,11 @@ bool WaveformRenderBeat::preprocessInner() {
         float width = 1.f;
         QVector4D color = beatColor;
         if (pBarInfo) {
-            if (pBarInfo->isPhraseStart(beatIndex)) {
+            if (pBarInfo->isSectionStart(beatIndex)) {
+                width = kSectionStartWidth;
+                color = toVector4D(sectionColor(pBarInfo->findPhrase(beatIndex)->kind),
+                        phraseColor.w());
+            } else if (pBarInfo->isPhraseStart(beatIndex)) {
                 width = 3.f;
                 color = phraseColor;
             } else if (pBarInfo->isDownbeat(beatIndex)) {

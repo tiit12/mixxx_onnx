@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 
+#include "analyzer/phraseanalyzer.h"
 #include "audio/types.h"
 #include "util/types.h"
 
@@ -54,6 +55,11 @@ class DownbeatDetector {
         return m_downbeatLogits;
     }
 
+    /// Band energies for the phrase analysis, one value per frame.
+    const BandEnergies& bandEnergies() const {
+        return m_bandEnergies;
+    }
+
   private:
     void appendResampled(const double* pSamples, int count);
     double signalAt(SINT index) const;
@@ -70,6 +76,8 @@ class DownbeatDetector {
     std::vector<double> m_monoBuffer;
     std::vector<double> m_resampledBuffer;
     std::vector<float> m_chunk;
+    /// Index of the BandEnergies::spectrum band of each FFT bin, or -1
+    std::vector<int> m_spectrumBandOfBin;
 
     audio::SampleRate m_inputSampleRate;
     audio::ChannelCount m_channelCount;
@@ -94,6 +102,7 @@ class DownbeatDetector {
 
     std::vector<float> m_beatLogits;
     std::vector<float> m_downbeatLogits;
+    BandEnergies m_bandEnergies;
 };
 
 } // namespace mixxx

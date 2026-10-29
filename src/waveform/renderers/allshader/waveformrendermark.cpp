@@ -825,12 +825,8 @@ void allshader::WaveformRenderMark::updateUntilPhrase(double playPosition) {
         it--;
     }
     const int beatIndex = trackBeats->beatIndex(it);
-    const int phraseLength = pBarInfo->phraseLengthBeats(beatIndex);
-    if (phraseLength <= 0) {
-        // The last analyzed phrase lasts until the end of the track
-        return;
-    }
-    m_beatsUntilPhrase = phraseLength - pBarInfo->beatInPhrase(beatIndex);
+    m_beatsUntilPhrase = pBarInfo->phraseLengthBeats(beatIndex) -
+            pBarInfo->beatInPhrase(beatIndex);
 }
 
 void allshader::WaveformRenderMark::updateDigitsNodeForUntilPhrase(float x) {

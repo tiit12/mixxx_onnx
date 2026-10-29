@@ -89,6 +89,19 @@ venv/bin/python make_test_reference.py --sample-rate 22050 --out ../../src/test/
 ```
 
 `export_onnx.py` also verifies the export against PyTorch and measures the
-CPU speed. If the analysis results change, increment
+CPU speed.
+
+## Tuning the phrase analysis
+
+`phrase_features.py track.mp3` prints the band energies per bar.
+`dump_phrase_features.py` saves the features of many tracks, which the
+disabled test `PhraseAnalyzerTest.DISABLED_FeatureFiles` analyzes with the
+C++ `PhraseAnalyzer`, so the thresholds can be tuned without Mixxx:
+
+```sh
+venv/bin/python dump_phrase_features.py --out /tmp/features ~/Music/*.mp3
+PHRASE_FEATURES_DIR=/tmp/features build/mixxx-test \
+    --gtest_also_run_disabled_tests --gtest_filter='*FeatureFiles'
+``` If the analysis results change, increment
 `kNeuralAnalyzerVersion` in `src/analyzer/analyzerbars.cpp` to re-analyze the
 tracks.

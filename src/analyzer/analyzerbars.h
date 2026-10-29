@@ -50,6 +50,7 @@ class AnalyzerBars : public Analyzer {
   private:
     QString modelPath() const;
     bool isNeuralDetectionAvailable() const;
+    QString currentAnalyzerVersion() const;
     bool hasCurrentBarInfo(const mixxx::Beats& beats) const;
 
     UserSettingsPointer m_pConfig;
