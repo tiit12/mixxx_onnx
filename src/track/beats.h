@@ -91,6 +91,8 @@ class BarInfo {
     int anchorBeat = 0;
     int beatsPerBar = kDefaultBeatsPerBar;
     Source source = Source::Analyzer;
+    /// Identifies the algorithm that produced the analyzer results.
+    QString analyzerVersion;
     /// Analyzed phrases, sorted by start beat. If empty, phrases of
     /// `kDefaultBarsPerPhrase` bars starting at `anchorBeat` are assumed.
     std::vector<Phrase> phrases;

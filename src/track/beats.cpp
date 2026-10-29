@@ -63,6 +63,9 @@ void barInfoToProto(const mixxx::BarInfo& barInfo, mixxx::track::io::BarInfo* pP
     pProto->set_source(barInfo.source == mixxx::BarInfo::Source::User
                     ? mixxx::track::io::USER
                     : mixxx::track::io::ANALYZER);
+    if (!barInfo.analyzerVersion.isEmpty()) {
+        pProto->set_analyzer_version(barInfo.analyzerVersion.toStdString());
+    }
     for (const auto& phrase : barInfo.phrases) {
         auto* pPhrase = pProto->add_phrase();
         pPhrase->set_start_beat(phrase.startBeat);
@@ -82,6 +85,7 @@ mixxx::BarInfoPointer barInfoFromProto(const mixxx::track::io::BarInfo& proto) {
     pBarInfo->source = proto.source() == mixxx::track::io::USER
             ? mixxx::BarInfo::Source::User
             : mixxx::BarInfo::Source::Analyzer;
+    pBarInfo->analyzerVersion = QString::fromStdString(proto.analyzer_version());
     pBarInfo->phrases.reserve(proto.phrase_size());
     for (int i = 0; i < proto.phrase_size(); i++) {
         const auto& phrase = proto.phrase(i);

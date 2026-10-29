@@ -46,6 +46,8 @@ message BarInfo {
   optional int32 beats_per_bar = 2 [ default = 4 ];
   optional Source source = 3 [ default = ANALYZER ];
   repeated Phrase phrase = 4;
+  // Identifies the algorithm that produced the analyzer results.
+  optional string analyzer_version = 5;
 }
 
 message BeatMap {

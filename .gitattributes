@@ -24,6 +24,10 @@
 # Treat serato test data as binary
 *.octet-stream binary
 
+# Neural network models and their test data
+*.onnx binary
+/src/test/beatthis/*.bin binary
+
 # shell scripts will always have LF line endings on checkout.
 *.sh text eol=lf
 

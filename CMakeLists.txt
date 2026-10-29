@@ -3664,6 +3664,30 @@ if(KEYFINDER)
   target_compile_definitions(mixxx-lib PUBLIC __KEYFINDER__)
 endif()
 
+# ONNX Runtime for the neural network based downbeat detection.
+# Set ONNXRUNTIME_ROOT to an extracted release archive if the library is not
+# installed system-wide.
+option(ONNXRUNTIME "Neural network downbeat detection (ONNX Runtime)" OFF)
+if(ONNXRUNTIME)
+  find_package(OnnxRuntime REQUIRED)
+  target_link_libraries(mixxx-lib PRIVATE OnnxRuntime::OnnxRuntime)
+  target_sources(mixxx-lib PRIVATE src/analyzer/plugins/downbeatdetector.cpp)
+  target_compile_definitions(mixxx-lib PUBLIC __ONNXRUNTIME__)
+  if(BUILD_TESTING)
+    target_sources(mixxx-test PRIVATE src/test/downbeatdetectortest.cpp)
+    target_link_libraries(mixxx-test PRIVATE QueenMaryDsp)
+  endif()
+  install(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/res/models"
+    DESTINATION "${MIXXX_INSTALL_DATADIR}"
+  )
+  if(WIN32 AND OnnxRuntime_DLL)
+    # The DLL is not part of the vcpkg build environment
+    file(COPY "${OnnxRuntime_DLL}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+    install(FILES "${OnnxRuntime_DLL}" DESTINATION "${MIXXX_INSTALL_BINDIR}")
+  endif()
+endif()
+
 # FLAC
 find_package(FLAC REQUIRED)
 target_link_libraries(mixxx-lib PRIVATE FLAC::FLAC)
@@ -4800,9 +4824,9 @@ add_library(
   QueenMaryDsp
   STATIC
   EXCLUDE_FROM_ALL
-  # lib/qm-dsp/base/KaiserWindow.cpp
+  lib/qm-dsp/base/KaiserWindow.cpp
   lib/qm-dsp/base/Pitch.cpp
-  # lib/qm-dsp/base/SincWindow.cpp
+  lib/qm-dsp/base/SincWindow.cpp
   lib/qm-dsp/dsp/chromagram/Chromagram.cpp
   lib/qm-dsp/dsp/chromagram/ConstantQ.cpp
   lib/qm-dsp/dsp/keydetection/GetKeyMode.cpp
@@ -4812,7 +4836,7 @@ add_library(
   lib/qm-dsp/dsp/phasevocoder/PhaseVocoder.cpp
   lib/qm-dsp/dsp/rateconversion/Decimator.cpp
   # lib/qm-dsp/dsp/rateconversion/DecimatorB.cpp
-  # lib/qm-dsp/dsp/rateconversion/Resampler.cpp
+  lib/qm-dsp/dsp/rateconversion/Resampler.cpp
   # lib/qm-dsp/dsp/rhythm/BeatSpectrum.cpp
   # lib/qm-dsp/dsp/segmentation/ClusterMeltSegmenter.cpp
   # lib/qm-dsp/dsp/segmentation/Segmenter.cpp
