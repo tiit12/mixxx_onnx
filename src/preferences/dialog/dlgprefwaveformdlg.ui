@@ -479,19 +479,30 @@ Select from different types of displays for the waveform, which differ primarily
        </property>
       </widget>
      </item>
-     <item row="11" column="1" colspan="2">
-      <widget class="QCheckBox" name="untilMarkShowBeatsCheckBox">
-       <property name="text">
-        <string>Beats until next marker</string>
-       </property>
-      </widget>
-     </item>
-     <item row="11" column="3" colspan="2">
-      <widget class="QCheckBox" name="untilMarkShowTimeCheckBox">
-       <property name="text">
-        <string>Time until next marker</string>
-       </property>
-      </widget>
+     <item row="11" column="1" colspan="4">
+      <layout class="QHBoxLayout" name="marker_hints_layout">
+       <item>
+        <widget class="QCheckBox" name="untilMarkShowBeatsCheckBox">
+         <property name="text">
+          <string>Beats until next marker</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="untilMarkShowTimeCheckBox">
+         <property name="text">
+          <string>Time until next marker</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="untilPhraseShowBeatsCheckBox">
+         <property name="text">
+          <string>Beats until next phrase</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
      </item>
 
      <item row="12" column="1" colspan="4">
@@ -923,6 +934,7 @@ Select from different types of displays for the waveform overview, which differ 
   <tabstop>highVisualGain</tabstop>
   <tabstop>untilMarkShowBeatsCheckBox</tabstop>
   <tabstop>untilMarkShowTimeCheckBox</tabstop>
+  <tabstop>untilPhraseShowBeatsCheckBox</tabstop>
   <tabstop>untilMarkAlignComboBox</tabstop>
   <tabstop>untilMarkTextPointSizeSpinBox</tabstop>
   <tabstop>untilMarkTextHeightLimitComboBox</tabstop>

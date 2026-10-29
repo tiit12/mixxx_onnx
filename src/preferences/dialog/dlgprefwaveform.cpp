@@ -288,6 +288,10 @@ DlgPrefWaveform::DlgPrefWaveform(
             &QCheckBox::toggled,
             this,
             &DlgPrefWaveform::slotSetUntilMarkShowTime);
+    connect(untilPhraseShowBeatsCheckBox,
+            &QCheckBox::toggled,
+            this,
+            &DlgPrefWaveform::slotSetUntilPhraseShowBeats);
     connect(untilMarkAlignComboBox,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             this,
@@ -406,6 +410,7 @@ void DlgPrefWaveform::slotUpdate() {
 
     untilMarkShowBeatsCheckBox->setChecked(pFactory->getUntilMarkShowBeats());
     untilMarkShowTimeCheckBox->setChecked(pFactory->getUntilMarkShowTime());
+    untilPhraseShowBeatsCheckBox->setChecked(pFactory->getUntilPhraseShowBeats());
     untilMarkAlignComboBox->setCurrentIndex(
             WaveformWidgetFactory::toUntilMarkAlignIndex(
                     pFactory->getUntilMarkAlign()));
@@ -686,9 +691,11 @@ void DlgPrefWaveform::updateEnableUntilMark() {
 #endif
     untilMarkShowBeatsCheckBox->setEnabled(enabled);
     untilMarkShowTimeCheckBox->setEnabled(enabled);
+    untilPhraseShowBeatsCheckBox->setEnabled(enabled);
     // Disable the beats/time options if neither beats nor time is enabled
     bool beatsOrTimeEnabled = untilMarkShowBeatsCheckBox->isChecked() ||
-            untilMarkShowTimeCheckBox->isChecked();
+            untilMarkShowTimeCheckBox->isChecked() ||
+            untilPhraseShowBeatsCheckBox->isChecked();
     untilMarkAlignLabel->setEnabled(beatsOrTimeEnabled);
     untilMarkAlignComboBox->setEnabled(beatsOrTimeEnabled);
     untilMarkTextPointSizeLabel->setEnabled(beatsOrTimeEnabled);
@@ -860,6 +867,11 @@ void DlgPrefWaveform::slotSetUntilMarkShowTime(bool checked) {
     WaveformWidgetFactory::instance()->setUntilMarkShowTime(checked);
     updateEnableUntilMark();
     notifyQmlWaveformSettingsChanged();
+}
+
+void DlgPrefWaveform::slotSetUntilPhraseShowBeats(bool checked) {
+    WaveformWidgetFactory::instance()->setUntilPhraseShowBeats(checked);
+    updateEnableUntilMark();
 }
 
 void DlgPrefWaveform::slotSetUntilMarkAlign(int index) {

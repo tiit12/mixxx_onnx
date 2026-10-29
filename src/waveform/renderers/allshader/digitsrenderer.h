@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QColor>
+
 #include "rendergraph/context.h"
 #include "rendergraph/geometrynode.h"
 #include "util/class.h"
@@ -14,7 +16,7 @@ class DigitsRenderNode;
 
 class allshader::DigitsRenderNode : public rendergraph::GeometryNode {
   public:
-    DigitsRenderNode();
+    explicit DigitsRenderNode(const QColor& color = Qt::white);
     ~DigitsRenderNode();
 
     void updateTexture(rendergraph::Context* pContext,
@@ -39,6 +41,7 @@ class allshader::DigitsRenderNode : public rendergraph::GeometryNode {
             float y,
             const QString& s);
 
+    const QColor m_color;
     int m_penWidth;
     float m_offset[13];
     float m_width[12];

@@ -60,7 +60,8 @@ static_assert(checkCharToIndex());
 
 } // namespace
 
-allshader::DigitsRenderNode::DigitsRenderNode() {
+allshader::DigitsRenderNode::DigitsRenderNode(const QColor& color)
+        : m_color(color) {
     setGeometry(std::make_unique<Geometry>(TextureMaterial::attributes(), 0));
     setMaterial(std::make_unique<TextureMaterial>());
     geometry().setDrawingMode(Geometry::DrawingMode::Triangles);
@@ -194,8 +195,8 @@ void allshader::DigitsRenderNode::updateTexture(rendergraph::Context* pContext,
         painter.setRenderHint(QPainter::Antialiasing);
 
         painter.setFont(font);
-        painter.setPen(Qt::white);
-        painter.setBrush(Qt::white);
+        painter.setPen(m_color);
+        painter.setBrush(m_color);
 
         QPainterPath path;
         for (int i = 0; i < NUM_CHARS; i++) {

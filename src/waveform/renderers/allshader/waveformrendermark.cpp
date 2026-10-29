@@ -36,6 +36,9 @@ namespace {
 
 const double kDefaultNextMarkPosition = std::numeric_limits<double>::max();
 
+// Same as the default phrase start color of WaveformRenderBeat
+const QColor kPhraseDigitsColor = QColor(255, 96, 0);
+
 class WaveformMarkNode : public rendergraph::GeometryNode {
   public:
     WaveformMark* m_pOwner{};
@@ -223,6 +226,12 @@ allshader::WaveformRenderMark::WaveformRenderMark(
     }
 
     {
+        auto pNode = std::make_unique<DigitsRenderNode>(kPhraseDigitsColor);
+        m_pPhraseDigitsRenderNode = pNode.get();
+        appendChildNode(std::move(pNode));
+    }
+
+    {
         auto pNode = std::make_unique<GeometryNode>();
         m_pPlayPosNode = pNode.get();
         m_pPlayPosNode->initForRectangles<TextureMaterial>(1);
@@ -238,6 +247,10 @@ allshader::WaveformRenderMark::WaveformRenderMark(
             &WaveformWidgetFactory::untilMarkShowTimeChanged,
             this,
             &WaveformRenderMark::setUntilMarkShowTime);
+    connect(pWaveformWidgetFactory,
+            &WaveformWidgetFactory::untilPhraseShowBeatsChanged,
+            this,
+            &WaveformRenderMark::setUntilPhraseShowBeats);
     connect(pWaveformWidgetFactory,
             &WaveformWidgetFactory::untilMarkAlignChanged,
             this,
@@ -263,6 +276,7 @@ void allshader::WaveformRenderMark::setup(const QDomNode& node, const SkinContex
 
     m_untilMarkShowBeats = pWaveformWidgetFactory->getUntilMarkShowBeats();
     m_untilMarkShowTime = pWaveformWidgetFactory->getUntilMarkShowTime();
+    m_untilPhraseShowBeats = pWaveformWidgetFactory->getUntilPhraseShowBeats();
     m_untilMarkAlign = pWaveformWidgetFactory->getUntilMarkAlign();
 
     m_untilMarkTextSize =
@@ -533,6 +547,13 @@ void allshader::WaveformRenderMark::update() {
     } else {
         m_pDigitsRenderNode->clear();
     }
+
+    if (hasWaveform && m_untilPhraseShowBeats) {
+        updateUntilPhrase(playPosition);
+        updateDigitsNodeForUntilPhrase(roundToPixel(playMarkerPos + 20.f));
+    } else {
+        m_pPhraseDigitsRenderNode->clear();
+    }
 }
 
 void allshader::WaveformRenderMark::setDefaultNextMarkPosition(double nextMarkPosition) {
@@ -776,6 +797,66 @@ void allshader::WaveformRenderMark::updateUntilMark(
         m_currentBeatPosition = itA->toEngineSamplePos();
         m_beatsUntilMark = std::distance(itA, itB);
     }
+}
+
+void allshader::WaveformRenderMark::updateUntilPhrase(double playPosition) {
+    m_beatsUntilPhrase = 0;
+
+    const TrackPointer trackInfo = m_waveformRenderer->getTrackInfo();
+    if (!trackInfo) {
+        return;
+    }
+    const mixxx::BeatsPointer trackBeats = trackInfo->getBeats();
+    if (!trackBeats) {
+        return;
+    }
+    const mixxx::BarInfoPointer pBarInfo = trackBeats->getBarInfo();
+    if (!pBarInfo) {
+        return;
+    }
+
+    auto it = trackBeats->iteratorFrom(
+            mixxx::audio::FramePos::fromEngineSamplePos(playPosition));
+    if (it == trackBeats->cbegin() || it == trackBeats->cend()) {
+        return;
+    }
+    // Count from the beat at or before the play position, like updateUntilMark()
+    if (it->toEngineSamplePos() - playPosition >= 1) {
+        it--;
+    }
+    const int beatIndex = trackBeats->beatIndex(it);
+    const int phraseLength = pBarInfo->phraseLengthBeats(beatIndex);
+    if (phraseLength <= 0) {
+        // The last analyzed phrase lasts until the end of the track
+        return;
+    }
+    m_beatsUntilPhrase = phraseLength - pBarInfo->beatInPhrase(beatIndex);
+}
+
+void allshader::WaveformRenderMark::updateDigitsNodeForUntilPhrase(float x) {
+    m_pPhraseDigitsRenderNode->updateTexture(m_waveformRenderer->getContext(),
+            m_untilMarkTextSize,
+            getMaxHeightForText(m_untilMarkTextHeightLimit),
+            m_waveformRenderer->getDevicePixelRatio());
+
+    if (m_beatsUntilPhrase <= 0) {
+        m_pPhraseDigitsRenderNode->clear();
+        return;
+    }
+
+    // Place the digits at the top, or at the bottom if the "until mark"
+    // digits are shown at the top, so that they don't overlap.
+    const bool untilMarkShownAtTop = (m_untilMarkShowBeats || m_untilMarkShowTime) &&
+            m_untilMarkAlign == Qt::AlignTop;
+    const float y = untilMarkShownAtTop
+            ? m_waveformRenderer->getBreadth() - m_pPhraseDigitsRenderNode->height()
+            : 0.f;
+
+    m_pPhraseDigitsRenderNode->update(x,
+            y,
+            false,
+            QString::number(m_beatsUntilPhrase),
+            QString{});
 }
 
 float allshader::WaveformRenderMark::getMaxHeightForText(float proportion) const {

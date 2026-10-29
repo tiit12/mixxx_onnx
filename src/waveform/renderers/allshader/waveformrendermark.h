@@ -52,6 +52,9 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
     void setUntilMarkShowTime(bool untilMarkShowTime) {
         m_untilMarkShowTime = untilMarkShowTime;
     }
+    void setUntilPhraseShowBeats(bool untilPhraseShowBeats) {
+        m_untilPhraseShowBeats = untilPhraseShowBeats;
+    }
     void setUntilMarkAlign(Qt::Alignment untilMarkAlign) {
         m_untilMarkAlign = untilMarkAlign;
     }
@@ -77,6 +80,8 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
 
     void updateUntilMark(double playPosition, double markerPosition);
     void updateDigitsNodeForUntilMark(float x);
+    void updateUntilPhrase(double playPosition);
+    void updateDigitsNodeForUntilPhrase(float x);
     float getMaxHeightForText(float proportion) const;
     void updateRangeNode(rendergraph::GeometryNode* pNode,
             const QRectF& rect,
@@ -87,6 +92,7 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
 
     int m_beatsUntilMark;
     double m_timeUntilMark;
+    int m_beatsUntilPhrase{0};
     double m_currentBeatPosition;
     double m_nextBeatPosition;
     std::unique_ptr<ControlProxy> m_pTimeRemainingControl;
@@ -101,6 +107,7 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
     float m_playPosDevicePixelRatio;
 
     DigitsRenderNode* m_pDigitsRenderNode{};
+    DigitsRenderNode* m_pPhraseDigitsRenderNode{};
 
     QColor m_playMarkerForegroundColor;
     QColor m_playMarkerBackgroundColor;
@@ -108,6 +115,7 @@ class allshader::WaveformRenderMark : public ::WaveformRenderMarkBase,
 
     bool m_untilMarkShowBeats;
     bool m_untilMarkShowTime;
+    bool m_untilPhraseShowBeats{false};
     Qt::Alignment m_untilMarkAlign;
     int m_untilMarkTextSize;
     float m_untilMarkTextHeightLimit;
