@@ -453,6 +453,18 @@ bool Track::trySetBeats(mixxx::BeatsPointer pBeats) {
     return trySetBeatsMarkDirtyAndUnlock(&locked, pBeats, false);
 }
 
+bool Track::trySetBarInfo(mixxx::BarInfoPointer pBarInfo) {
+    auto locked = lockMutex(&m_qMutex);
+    if (!m_pBeats) {
+        return false;
+    }
+    if (!setBeatsWhileLocked(m_pBeats->withBarInfo(std::move(pBarInfo)))) {
+        return false;
+    }
+    afterBeatsAndBpmUpdated(&locked);
+    return true;
+}
+
 bool Track::setBeatsWhileLocked(mixxx::BeatsPointer pBeats) {
     if (m_pBeats == pBeats) {
         return false;

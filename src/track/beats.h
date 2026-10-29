@@ -53,6 +53,88 @@ inline bool operator!=(const BeatMarker& lhs, const BeatMarker& rhs) {
     return !(lhs == rhs);
 }
 
+constexpr int kDefaultBeatsPerBar = 4;
+constexpr int kDefaultBarsPerPhrase = 8;
+
+enum class PhraseKind {
+    Unknown,
+    Intro,
+    Buildup,
+    Drop,
+    Breakdown,
+    Outro,
+};
+
+/// A phrase lasts until the start of the next phrase (or the end of the track).
+struct Phrase {
+    /// Beat index relative to the first beat marker.
+    int startBeat = 0;
+    PhraseKind kind = PhraseKind::Unknown;
+    /// Relative energy of the phrase in the range [0, 1].
+    float energy = 0.f;
+};
+
+/// Bar and phrase structure on top of the beats.
+///
+/// All beat indices are relative to the first beat marker, i.e. the index of
+/// a beat iterator `it` is `it - beats.cfirstmarker()`. These indices are
+/// stable when the beats are translated or the BPM is adjusted, and are scaled
+/// along when the beats are scaled.
+class BarInfo {
+  public:
+    enum class Source {
+        Analyzer,
+        User,
+    };
+
+    /// Beat index of a downbeat that also starts a phrase.
+    int anchorBeat = 0;
+    int beatsPerBar = kDefaultBeatsPerBar;
+    Source source = Source::Analyzer;
+    /// Analyzed phrases, sorted by start beat. If empty, phrases of
+    /// `kDefaultBarsPerPhrase` bars starting at `anchorBeat` are assumed.
+    std::vector<Phrase> phrases;
+
+    /// Zero-based position of the beat within its bar.
+    int beatInBar(int beatIndex) const {
+        return positiveModulo(beatIndex - anchorBeat, beatsPerBar);
+    }
+
+    bool isDownbeat(int beatIndex) const {
+        return beatInBar(beatIndex) == 0;
+    }
+
+    /// Returns the phrase containing the beat, or nullptr if no phrases have
+    /// been analyzed or the beat lies before the first phrase.
+    const Phrase* findPhrase(int beatIndex) const;
+
+    /// Zero-based position of the beat within its phrase.
+    int beatInPhrase(int beatIndex) const;
+
+    /// Number of beats of the phrase containing the beat. Returns -1 for
+    /// the open-ended last analyzed phrase.
+    int phraseLengthBeats(int beatIndex) const;
+
+    bool isPhraseStart(int beatIndex) const {
+        return beatInPhrase(beatIndex) == 0;
+    }
+
+    /// Returns a copy with all beat indices multiplied by `scaleFactor`.
+    BarInfo scaled(double scaleFactor) const;
+
+    static int positiveModulo(int value, int divisor) {
+        const int result = value % divisor;
+        return result < 0 ? result + divisor : result;
+    }
+
+  private:
+    int defaultBeatsPerPhrase() const {
+        return beatsPerBar * kDefaultBarsPerPhrase;
+    }
+};
+
+typedef std::shared_ptr<const BarInfo> BarInfoPointer;
+
 /// This class represents the beats of a track.
 ///
 /// Internally, it uses the following data structure:
@@ -157,12 +239,14 @@ class Beats : private std::enable_shared_from_this<Beats> {
             mixxx::audio::FramePos lastMarkerPosition,
             mixxx::Bpm lastMarkerBpm,
             mixxx::audio::SampleRate sampleRate,
-            const QString& subVersion)
+            const QString& subVersion,
+            BarInfoPointer pBarInfo = nullptr)
             : m_markers(std::move(markers)),
               m_lastMarkerPosition(lastMarkerPosition),
               m_lastMarkerBpm(lastMarkerBpm),
               m_sampleRate(sampleRate),
-              m_subVersion(subVersion) {
+              m_subVersion(subVersion),
+              m_pBarInfo(std::move(pBarInfo)) {
         DEBUG_ASSERT(m_lastMarkerPosition.isValid());
         DEBUG_ASSERT(!m_lastMarkerPosition.isFractional());
         DEBUG_ASSERT(m_lastMarkerBpm.isValid());
@@ -388,6 +472,24 @@ class Beats : private std::enable_shared_from_this<Beats> {
     }
 
     ////////////////////////////////////////////////////////////////////////////
+    // Bars and phrases
+    ////////////////////////////////////////////////////////////////////////////
+
+    /// Returns the bar/phrase structure, or nullptr if it is unknown.
+    BarInfoPointer getBarInfo() const {
+        return m_pBarInfo;
+    }
+
+    /// Returns the index of the beat `it` points to, relative to the first
+    /// beat marker. See `BarInfo`.
+    int beatIndex(const ConstIterator& it) const {
+        return it - cfirstmarker();
+    }
+
+    /// Returns a copy of these beats with the given bar/phrase structure.
+    BeatsPointer withBarInfo(BarInfoPointer pBarInfo) const;
+
+    ////////////////////////////////////////////////////////////////////////////
     // Beat mutations
     ////////////////////////////////////////////////////////////////////////////
 
@@ -445,6 +547,8 @@ class Beats : private std::enable_shared_from_this<Beats> {
 
     // The sub-version of this beatgrid.
     const QString m_subVersion;
+
+    BarInfoPointer m_pBarInfo;
 };
 
 } // namespace mixxx

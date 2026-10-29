@@ -1200,6 +1200,7 @@ add_library(
   mixxx-lib
   STATIC
   EXCLUDE_FROM_ALL
+  src/analyzer/analyzerbars.cpp
   src/analyzer/analyzerbeats.cpp
   src/analyzer/analyzerebur128.cpp
   src/analyzer/analyzergain.cpp

@@ -2,6 +2,7 @@
 
 #include <mutex>
 
+#include "analyzer/analyzerbars.h"
 #include "analyzer/analyzerbeats.h"
 #include "analyzer/analyzerebur128.h"
 #include "analyzer/analyzergain.h"
@@ -115,6 +116,8 @@ void AnalyzerThread::doRun() {
     m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerBeats>(m_pConfig, enforceBpmDetection)));
     m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerKey>(m_pConfig)));
     m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerSilence>(m_pConfig)));
+    // Depends on the results of AnalyzerBeats and AnalyzerSilence
+    m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerBars>(m_pConfig)));
     DEBUG_ASSERT(!m_analyzers.empty());
     kLogger.debug() << "Activated" << m_analyzers.size() << "analyzers";
 

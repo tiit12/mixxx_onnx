@@ -1,12 +1,14 @@
 #include "waveform/renderers/allshader/waveformrenderbeat.h"
 
 #include <QDomNode>
+#include <algorithm>
+#include <cmath>
 
 #include "engine/engine.h"
 #include "moc_waveformrenderbeat.cpp"
 #include "rendergraph/geometry.h"
-#include "rendergraph/material/unicolormaterial.h"
-#include "rendergraph/vertexupdaters/vertexupdater.h"
+#include "rendergraph/material/rgbamaterial.h"
+#include "rendergraph/vertexupdaters/rgbavertexupdater.h"
 #include "skin/legacy/skincontext.h"
 #include "track/track.h"
 #include "waveform/renderers/waveformwidgetrenderer.h"
@@ -16,19 +18,40 @@
 
 using namespace rendergraph;
 
+namespace {
+
+const QColor kDefaultBarColor = QColor(255, 255, 255);
+const QColor kDefaultPhraseColor = QColor(255, 96, 0);
+
+QVector4D toVector4D(const QColor& color, float alpha) {
+    return QVector4D(color.redF(), color.greenF(), color.blueF(), alpha);
+}
+
+} // namespace
+
 namespace allshader {
 
 WaveformRenderBeat::WaveformRenderBeat(WaveformWidgetRenderer* waveformWidget,
         ::WaveformRendererAbstract::PositionSource type)
         : ::WaveformRendererAbstract(waveformWidget),
+          m_barColor(kDefaultBarColor),
+          m_phraseColor(kDefaultPhraseColor),
           m_isSlipRenderer(type == ::WaveformRendererAbstract::Slip) {
-    initForRectangles<UniColorMaterial>(0);
+    initForRectangles<RGBAMaterial>(0);
     setUsePreprocess(true);
 }
 
 void WaveformRenderBeat::setup(const QDomNode& node, const SkinContext& skinContext) {
     m_color = QColor(skinContext.selectString(node, QStringLiteral("BeatColor")));
     m_color = WSkinColor::getCorrectColor(m_color).toRgb();
+    const QColor barColor(skinContext.selectString(node, QStringLiteral("BarColor")));
+    if (barColor.isValid()) {
+        m_barColor = WSkinColor::getCorrectColor(barColor).toRgb();
+    }
+    const QColor phraseColor(skinContext.selectString(node, QStringLiteral("PhraseColor")));
+    if (phraseColor.isValid()) {
+        m_phraseColor = WSkinColor::getCorrectColor(phraseColor).toRgb();
+    }
 }
 
 void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* event) {
@@ -119,15 +142,21 @@ bool WaveformRenderBeat::preprocessInner() {
     const int reserved = numBeatsInRange * numVerticesPerLine * numBoxesPerBeat;
     geometry().allocate(reserved);
 
-    VertexUpdater vertexUpdater{geometry().vertexDataAs<Geometry::Point2D>()};
+    RGBAVertexUpdater vertexUpdater{geometry().vertexDataAs<Geometry::RGBAColoredPoint2D>()};
 
     const float boxBreadth = splitStemTracks
             ? rendererBreadth / static_cast<float>(mixxx::kMaxSupportedStems)
             : rendererBreadth;
 
-    for (auto it = trackBeats->iteratorFrom(startPosition);
-            it != trackBeats->cend() && *it <= endPosition;
-            ++it) {
+    const mixxx::BarInfoPointer pBarInfo = trackBeats->getBarInfo();
+    const float beatAlpha = static_cast<float>(m_color.alphaF());
+    const QVector4D beatColor = toVector4D(m_color, beatAlpha);
+    const QVector4D barColor = toVector4D(m_barColor, std::min(1.f, beatAlpha * 1.5f + 0.1f));
+    const QVector4D phraseColor = toVector4D(m_phraseColor, std::min(1.f, beatAlpha * 2.f + 0.2f));
+
+    auto it = trackBeats->iteratorFrom(startPosition);
+    int beatIndex = pBarInfo ? trackBeats->beatIndex(it) : 0;
+    for (; it != trackBeats->cend() && *it <= endPosition; ++it, ++beatIndex) {
         double beatPosition = it->toEngineSamplePos();
         double xBeatPoint =
                 m_waveformRenderer->transformSamplePositionInRendererWorld(
@@ -135,25 +164,38 @@ bool WaveformRenderBeat::preprocessInner() {
 
         xBeatPoint = qRound(xBeatPoint * devicePixelRatio) / devicePixelRatio;
 
-        const float x1 = static_cast<float>(xBeatPoint);
-        const float x2 = x1 + 1.f;
+        float width = 1.f;
+        QVector4D color = beatColor;
+        if (pBarInfo) {
+            if (pBarInfo->isPhraseStart(beatIndex)) {
+                width = 3.f;
+                color = phraseColor;
+            } else if (pBarInfo->isDownbeat(beatIndex)) {
+                width = 2.f;
+                color = barColor;
+            }
+        }
+
+        // Center wider lines on the beat
+        const float x1 = static_cast<float>(xBeatPoint) - std::floor((width - 1.f) / 2.f);
+        const float x2 = x1 + width;
 
         if (m_isSlipRenderer && splitStemTracks) {
             for (int stemIdx = 0; stemIdx < mixxx::kMaxSupportedStems; ++stemIdx) {
                 const float posy1 = stemIdx * boxBreadth;
                 const float posy2 = posy1 + boxBreadth / 2.f;
-                vertexUpdater.addRectangle({x1, posy1}, {x2, posy2});
+                vertexUpdater.addRectangle({x1, posy1}, {x2, posy2}, color);
             }
         } else {
             vertexUpdater.addRectangle({x1, 0.f},
-                    {x2, m_isSlipRenderer ? rendererBreadth / 2 : rendererBreadth});
+                    {x2, m_isSlipRenderer ? rendererBreadth / 2 : rendererBreadth},
+                    color);
         }
     }
     markDirtyGeometry();
 
     DEBUG_ASSERT(reserved == vertexUpdater.index());
 
-    material().setUniform(1, m_color);
     markDirtyMaterial();
 
     return true;

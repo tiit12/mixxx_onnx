@@ -384,6 +384,11 @@ class Track : public QObject {
     // Set the track's Beats if not locked
     bool trySetBeats(mixxx::BeatsPointer pBeats);
 
+    /// Replace the bar/phrase structure of the track's beats. This is also
+    /// allowed if the BPM is locked, because the beat positions are not
+    /// affected. Returns false if the track has no beats.
+    bool trySetBarInfo(mixxx::BarInfoPointer pBarInfo);
+
     void undoBeatsChange();
     bool canUndoBeatsChange() const {
         return !m_pBeatsUndoStack.isEmpty();

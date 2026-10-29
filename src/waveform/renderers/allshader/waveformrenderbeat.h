@@ -38,6 +38,10 @@ class allshader::WaveformRenderBeat final
 
   private:
     QColor m_color;
+    // Downbeats
+    QColor m_barColor;
+    // Downbeats that start a phrase
+    QColor m_phraseColor;
     bool m_isSlipRenderer;
 
     bool preprocessInner();

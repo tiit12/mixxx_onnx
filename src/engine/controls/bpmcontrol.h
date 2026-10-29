@@ -127,6 +127,12 @@ class BpmControl : public EngineControl {
     double calcSyncAdjustment(bool userTweakingSync);
     void adjustBeatsBpm(double deltaBpm);
     void slotScaleBpm(mixxx::Beats::BpmScale bpmScale);
+    /// Moves the downbeats and phrase starts by the given number of beats.
+    void shiftBarAnchor(int beats);
+    /// Makes the beat closest to the play position a phrase-starting downbeat.
+    void setBarAnchorToCurrentPosition();
+    /// Updates the bar/phrase position controls. Called from the engine thread.
+    void updateBarPosition(mixxx::audio::FramePos playpos);
 
     friend class SyncControl;
 
@@ -165,6 +171,19 @@ class BpmControl : public EngineControl {
     std::unique_ptr<ControlPushButton> m_pBeatsDouble;
 
     std::unique_ptr<ControlPushButton> m_pBpmLock;
+
+    // Bar and phrase position of the play position (1-based, 0 if unknown)
+    std::unique_ptr<ControlObject> m_pBeatInBar;
+    std::unique_ptr<ControlObject> m_pBarInPhrase;
+    // -1 if unknown
+    std::unique_ptr<ControlObject> m_pBeatsUntilPhrase;
+    // mixxx::PhraseKind of the current phrase
+    std::unique_ptr<ControlObject> m_pPhraseKind;
+    std::unique_ptr<ControlPushButton> m_pBarShiftEarlier;
+    std::unique_ptr<ControlPushButton> m_pBarShiftLater;
+    std::unique_ptr<ControlPushButton> m_pPhraseShiftEarlier;
+    std::unique_ptr<ControlPushButton> m_pPhraseShiftLater;
+    std::unique_ptr<ControlPushButton> m_pBarSetCurpos;
 
     // The current effective BPM of the engine
     std::unique_ptr<ControlLinPotmeter> m_pEngineBpm;

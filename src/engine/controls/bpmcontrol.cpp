@@ -285,6 +285,68 @@ BpmControl::BpmControl(const QString& group,
     m_pBeatsUndoPossible = std::make_unique<ControlObject>(
             ConfigKey(group, "beats_undo_possible"));
     m_pBeatsUndoPossible->setReadOnly();
+
+    m_pBeatInBar = std::make_unique<ControlObject>(ConfigKey(group, "beat_in_bar"));
+    m_pBeatInBar->setReadOnly();
+    m_pBarInPhrase = std::make_unique<ControlObject>(ConfigKey(group, "bar_in_phrase"));
+    m_pBarInPhrase->setReadOnly();
+    m_pBeatsUntilPhrase = std::make_unique<ControlObject>(
+            ConfigKey(group, "beats_until_phrase"));
+    m_pBeatsUntilPhrase->setReadOnly();
+    m_pBeatsUntilPhrase->forceSet(-1);
+    m_pPhraseKind = std::make_unique<ControlObject>(ConfigKey(group, "phrase_kind"));
+    m_pPhraseKind->setReadOnly();
+
+    m_pBarShiftEarlier = std::make_unique<ControlPushButton>(
+            ConfigKey(group, "bar_shift_earlier"), false);
+    connect(m_pBarShiftEarlier.get(),
+            &ControlObject::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0) {
+                    shiftBarAnchor(-1);
+                }
+            });
+    m_pBarShiftLater = std::make_unique<ControlPushButton>(
+            ConfigKey(group, "bar_shift_later"), false);
+    connect(m_pBarShiftLater.get(),
+            &ControlObject::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0) {
+                    shiftBarAnchor(1);
+                }
+            });
+    m_pPhraseShiftEarlier = std::make_unique<ControlPushButton>(
+            ConfigKey(group, "phrase_shift_earlier"), false);
+    connect(m_pPhraseShiftEarlier.get(),
+            &ControlObject::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0) {
+                    shiftBarAnchor(-mixxx::kDefaultBeatsPerBar);
+                }
+            });
+    m_pPhraseShiftLater = std::make_unique<ControlPushButton>(
+            ConfigKey(group, "phrase_shift_later"), false);
+    connect(m_pPhraseShiftLater.get(),
+            &ControlObject::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0) {
+                    shiftBarAnchor(mixxx::kDefaultBeatsPerBar);
+                }
+            });
+    m_pBarSetCurpos = std::make_unique<ControlPushButton>(
+            ConfigKey(group, "bar_set_curpos"), false);
+    connect(m_pBarSetCurpos.get(),
+            &ControlObject::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0) {
+                    setBarAnchorToCurrentPosition();
+                }
+            });
 }
 
 mixxx::Bpm BpmControl::getBpm() const {
@@ -1250,6 +1312,85 @@ void BpmControl::slotBeatsTranslateMatchAlignment(double v) {
     }
 }
 
+void BpmControl::shiftBarAnchor(int beats) {
+    const TrackPointer pTrack = getEngineBuffer()->getLoadedTrack();
+    if (!pTrack) {
+        return;
+    }
+    const mixxx::BeatsPointer pBeats = pTrack->getBeats();
+    if (!pBeats) {
+        return;
+    }
+    auto pBarInfo = pBeats->getBarInfo()
+            ? std::make_shared<mixxx::BarInfo>(*pBeats->getBarInfo())
+            : std::make_shared<mixxx::BarInfo>();
+    pBarInfo->anchorBeat += beats;
+    for (auto& phrase : pBarInfo->phrases) {
+        phrase.startBeat += beats;
+    }
+    pBarInfo->source = mixxx::BarInfo::Source::User;
+    pTrack->trySetBarInfo(std::move(pBarInfo));
+}
+
+void BpmControl::setBarAnchorToCurrentPosition() {
+    const TrackPointer pTrack = getEngineBuffer()->getLoadedTrack();
+    if (!pTrack) {
+        return;
+    }
+    const mixxx::BeatsPointer pBeats = pTrack->getBeats();
+    if (!pBeats) {
+        return;
+    }
+    const auto closestBeat = pBeats->findClosestBeat(frameInfo().currentPosition);
+    if (!closestBeat.isValid()) {
+        return;
+    }
+    const int closestBeatIndex = pBeats->beatIndex(pBeats->iteratorFrom(closestBeat));
+    const mixxx::BarInfoPointer pOldBarInfo = pBeats->getBarInfo();
+    auto pBarInfo = pOldBarInfo
+            ? std::make_shared<mixxx::BarInfo>(*pOldBarInfo)
+            : std::make_shared<mixxx::BarInfo>();
+    pBarInfo->anchorBeat = closestBeatIndex;
+    // Analyzed phrases are moved along with the anchor, so that the phrase
+    // containing the play position starts at the selected beat.
+    if (const mixxx::Phrase* pPhrase = pBarInfo->findPhrase(closestBeatIndex)) {
+        const int phraseShift = closestBeatIndex - pPhrase->startBeat;
+        for (auto& phrase : pBarInfo->phrases) {
+            phrase.startBeat += phraseShift;
+        }
+    }
+    pBarInfo->source = mixxx::BarInfo::Source::User;
+    pTrack->trySetBarInfo(std::move(pBarInfo));
+}
+
+void BpmControl::updateBarPosition(mixxx::audio::FramePos playpos) {
+    const mixxx::BeatsPointer pBeats = m_pBeats;
+    const mixxx::BarInfoPointer pBarInfo = pBeats ? pBeats->getBarInfo() : nullptr;
+    if (!pBarInfo || !playpos.isValid()) {
+        m_pBeatInBar->forceSet(0);
+        m_pBarInPhrase->forceSet(0);
+        m_pBeatsUntilPhrase->forceSet(-1);
+        m_pPhraseKind->forceSet(0);
+        return;
+    }
+    // The beat at or before the play position
+    auto it = pBeats->iteratorFrom(playpos);
+    if (it == pBeats->cbegin() || it == pBeats->cend()) {
+        return;
+    }
+    if (*it > playpos) {
+        it--;
+    }
+    const int beatIndex = pBeats->beatIndex(it);
+    const int beatInPhrase = pBarInfo->beatInPhrase(beatIndex);
+    const int phraseLength = pBarInfo->phraseLengthBeats(beatIndex);
+    const mixxx::Phrase* pPhrase = pBarInfo->findPhrase(beatIndex);
+    m_pBeatInBar->forceSet(pBarInfo->beatInBar(beatIndex) + 1);
+    m_pBarInPhrase->forceSet(beatInPhrase / pBarInfo->beatsPerBar + 1);
+    m_pBeatsUntilPhrase->forceSet(phraseLength > 0 ? phraseLength - beatInPhrase : -1);
+    m_pPhraseKind->forceSet(pPhrase ? static_cast<double>(pPhrase->kind) : 0);
+}
+
 void BpmControl::slotToggleBpmLock(double v) {
     Q_UNUSED(v);
     const TrackPointer pTrack = getEngineBuffer()->getLoadedTrack();
@@ -1297,6 +1438,7 @@ double BpmControl::updateBeatDistance() {
 double BpmControl::updateBeatDistance(mixxx::audio::FramePos playpos) {
     double beatDistance = getBeatDistance(playpos);
     m_pThisBeatDistance.set(beatDistance);
+    updateBarPosition(playpos);
     if (!isSynchronized() && m_dUserOffset.getValue() != 0.0) {
         m_dUserOffset.setValue(0.0);
     }

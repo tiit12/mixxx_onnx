@@ -635,4 +635,99 @@ TEST(BeatsTest, IteratorFromFloorUndershoot) {
     EXPECT_LT(std::prev(it)->value(), position.value());
 }
 
+BarInfoPointer makeBarInfo(int anchorBeat, std::vector<Phrase> phrases = {}) {
+    auto pBarInfo = std::make_shared<BarInfo>();
+    pBarInfo->anchorBeat = anchorBeat;
+    pBarInfo->phrases = std::move(phrases);
+    return pBarInfo;
+}
+
+TEST(BeatsTest, BarInfoDefaultPhrases) {
+    const auto pBarInfo = makeBarInfo(3);
+    EXPECT_TRUE(pBarInfo->isDownbeat(3));
+    EXPECT_TRUE(pBarInfo->isDownbeat(-1));
+    EXPECT_FALSE(pBarInfo->isDownbeat(4));
+    EXPECT_EQ(1, pBarInfo->beatInBar(4));
+    EXPECT_TRUE(pBarInfo->isPhraseStart(3));
+    EXPECT_TRUE(pBarInfo->isPhraseStart(35));
+    EXPECT_TRUE(pBarInfo->isPhraseStart(-29));
+    EXPECT_FALSE(pBarInfo->isPhraseStart(7));
+    EXPECT_EQ(31, pBarInfo->beatInPhrase(2));
+    EXPECT_EQ(32, pBarInfo->phraseLengthBeats(100));
+}
+
+TEST(BeatsTest, BarInfoAnalyzedPhrases) {
+    const auto pBarInfo = makeBarInfo(0,
+            {Phrase{0, PhraseKind::Intro, 0.2f},
+                    Phrase{64, PhraseKind::Drop, 1.f},
+                    Phrase{80, PhraseKind::Breakdown, 0.4f}});
+    // Before the first phrase, the default phrase length is used
+    EXPECT_EQ(nullptr, pBarInfo->findPhrase(-1));
+    EXPECT_EQ(31, pBarInfo->beatInPhrase(-1));
+    EXPECT_EQ(PhraseKind::Intro, pBarInfo->findPhrase(63)->kind);
+    EXPECT_EQ(63, pBarInfo->beatInPhrase(63));
+    EXPECT_EQ(64, pBarInfo->phraseLengthBeats(63));
+    EXPECT_TRUE(pBarInfo->isPhraseStart(64));
+    EXPECT_EQ(PhraseKind::Drop, pBarInfo->findPhrase(70)->kind);
+    EXPECT_EQ(16, pBarInfo->phraseLengthBeats(70));
+    // The last phrase is open-ended
+    EXPECT_EQ(PhraseKind::Breakdown, pBarInfo->findPhrase(1000)->kind);
+    EXPECT_EQ(-1, pBarInfo->phraseLengthBeats(1000));
+}
+
+TEST(BeatsTest, BarInfoSerializationRoundTrip) {
+    const auto pBarInfo = makeBarInfo(5,
+            {Phrase{5, PhraseKind::Intro, 0.25f}, Phrase{69, PhraseKind::Drop, 1.f}});
+    for (const Beats* pBeats : {&kConstTempoBeats, &kNonConstTempoBeats}) {
+        const auto pWithBarInfo = pBeats->withBarInfo(pBarInfo);
+        const auto pDeserialized = Beats::fromByteArray(kSampleRate,
+                pWithBarInfo->getVersion(),
+                QString(),
+                pWithBarInfo->toByteArray());
+        ASSERT_NE(nullptr, pDeserialized);
+        const auto pResult = pDeserialized->getBarInfo();
+        ASSERT_NE(nullptr, pResult);
+        EXPECT_EQ(5, pResult->anchorBeat);
+        EXPECT_EQ(kDefaultBeatsPerBar, pResult->beatsPerBar);
+        ASSERT_EQ(2u, pResult->phrases.size());
+        EXPECT_EQ(69, pResult->phrases[1].startBeat);
+        EXPECT_EQ(PhraseKind::Drop, pResult->phrases[1].kind);
+        EXPECT_FLOAT_EQ(0.25f, pResult->phrases[0].energy);
+        // The beat indices refer to the same beat positions
+        EXPECT_EQ(*(pWithBarInfo->cfirstmarker() + 5), *(pDeserialized->cfirstmarker() + 5));
+    }
+}
+
+TEST(BeatsTest, BarInfoWithoutBarInfoSerialization) {
+    const auto pDeserialized = Beats::fromByteArray(kSampleRate,
+            kConstTempoBeats.getVersion(),
+            QString(),
+            kConstTempoBeats.toByteArray());
+    ASSERT_NE(nullptr, pDeserialized);
+    EXPECT_EQ(nullptr, pDeserialized->getBarInfo());
+}
+
+TEST(BeatsTest, BarInfoKeptOnTranslate) {
+    const auto pBeats = kConstTempoBeats.withBarInfo(makeBarInfo(2));
+    const auto downbeat = *(pBeats->cfirstmarker() + 2);
+    const auto pTranslated = *pBeats->tryTranslate(100);
+    ASSERT_NE(nullptr, pTranslated->getBarInfo());
+    // The same beat (moved by 100 frames) is still the downbeat
+    const int index = pTranslated->beatIndex(pTranslated->iteratorFrom(downbeat + 100));
+    EXPECT_TRUE(pTranslated->getBarInfo()->isDownbeat(index));
+}
+
+TEST(BeatsTest, BarInfoScaled) {
+    const auto pBeats = kConstTempoBeats.withBarInfo(
+            makeBarInfo(2, {Phrase{2, PhraseKind::Intro, 0.f}}));
+    const auto downbeat = *(pBeats->cfirstmarker() + 2);
+    const auto pDoubled = *pBeats->tryScale(Beats::BpmScale::Double);
+    EXPECT_EQ(4, pDoubled->getBarInfo()->anchorBeat);
+    EXPECT_EQ(4, pDoubled->getBarInfo()->phrases[0].startBeat);
+    EXPECT_EQ(downbeat, *(pDoubled->cfirstmarker() + 4));
+    const auto pHalved = *pBeats->tryScale(Beats::BpmScale::Halve);
+    EXPECT_EQ(1, pHalved->getBarInfo()->anchorBeat);
+    EXPECT_EQ(downbeat, *(pHalved->cfirstmarker() + 1));
+}
+
 } // namespace

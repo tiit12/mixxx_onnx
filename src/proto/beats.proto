@@ -21,11 +21,40 @@ message Bpm {
   optional Source source = 2 [ default = ANALYZER ];
 }
 
+enum PhraseKind {
+  PHRASE_UNKNOWN = 0;
+  PHRASE_INTRO = 1;
+  PHRASE_BUILDUP = 2;
+  PHRASE_DROP = 3;
+  PHRASE_BREAKDOWN = 4;
+  PHRASE_OUTRO = 5;
+}
+
+// A phrase lasts until the start of the next phrase (or the end of the track).
+message Phrase {
+  // Beat index relative to the first beat marker.
+  optional int32 start_beat = 1;
+  optional PhraseKind kind = 2 [ default = PHRASE_UNKNOWN ];
+  // Relative energy of the phrase in the range [0, 1].
+  optional float energy = 3;
+}
+
+message BarInfo {
+  // Beat index (relative to the first beat marker) of a downbeat that also
+  // starts a phrase.
+  optional int32 anchor_beat = 1;
+  optional int32 beats_per_bar = 2 [ default = 4 ];
+  optional Source source = 3 [ default = ANALYZER ];
+  repeated Phrase phrase = 4;
+}
+
 message BeatMap {
   repeated Beat beat = 1;
+  optional BarInfo bar_info = 2;
 }
 
 message BeatGrid {
   optional Bpm bpm = 1;
   optional Beat first_beat = 2;
+  optional BarInfo bar_info = 3;
 }

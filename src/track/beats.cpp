@@ -1,5 +1,6 @@
 #include "track/beats.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iterator>
 #include <unordered_map>
@@ -21,9 +22,127 @@ struct BeatGridV1Data {
 
 constexpr double kEpsilon = 0.01;
 
+mixxx::track::io::PhraseKind phraseKindToProto(mixxx::PhraseKind kind) {
+    switch (kind) {
+    case mixxx::PhraseKind::Intro:
+        return mixxx::track::io::PHRASE_INTRO;
+    case mixxx::PhraseKind::Buildup:
+        return mixxx::track::io::PHRASE_BUILDUP;
+    case mixxx::PhraseKind::Drop:
+        return mixxx::track::io::PHRASE_DROP;
+    case mixxx::PhraseKind::Breakdown:
+        return mixxx::track::io::PHRASE_BREAKDOWN;
+    case mixxx::PhraseKind::Outro:
+        return mixxx::track::io::PHRASE_OUTRO;
+    case mixxx::PhraseKind::Unknown:
+        break;
+    }
+    return mixxx::track::io::PHRASE_UNKNOWN;
+}
+
+mixxx::PhraseKind phraseKindFromProto(mixxx::track::io::PhraseKind kind) {
+    switch (kind) {
+    case mixxx::track::io::PHRASE_INTRO:
+        return mixxx::PhraseKind::Intro;
+    case mixxx::track::io::PHRASE_BUILDUP:
+        return mixxx::PhraseKind::Buildup;
+    case mixxx::track::io::PHRASE_DROP:
+        return mixxx::PhraseKind::Drop;
+    case mixxx::track::io::PHRASE_BREAKDOWN:
+        return mixxx::PhraseKind::Breakdown;
+    case mixxx::track::io::PHRASE_OUTRO:
+        return mixxx::PhraseKind::Outro;
+    default:
+        return mixxx::PhraseKind::Unknown;
+    }
+}
+
+void barInfoToProto(const mixxx::BarInfo& barInfo, mixxx::track::io::BarInfo* pProto) {
+    pProto->set_anchor_beat(barInfo.anchorBeat);
+    pProto->set_beats_per_bar(barInfo.beatsPerBar);
+    pProto->set_source(barInfo.source == mixxx::BarInfo::Source::User
+                    ? mixxx::track::io::USER
+                    : mixxx::track::io::ANALYZER);
+    for (const auto& phrase : barInfo.phrases) {
+        auto* pPhrase = pProto->add_phrase();
+        pPhrase->set_start_beat(phrase.startBeat);
+        pPhrase->set_kind(phraseKindToProto(phrase.kind));
+        pPhrase->set_energy(phrase.energy);
+    }
+}
+
+mixxx::BarInfoPointer barInfoFromProto(const mixxx::track::io::BarInfo& proto) {
+    if (proto.beats_per_bar() <= 0) {
+        qWarning() << "Ignoring bar info with invalid beats per bar" << proto.beats_per_bar();
+        return nullptr;
+    }
+    auto pBarInfo = std::make_shared<mixxx::BarInfo>();
+    pBarInfo->anchorBeat = proto.anchor_beat();
+    pBarInfo->beatsPerBar = proto.beats_per_bar();
+    pBarInfo->source = proto.source() == mixxx::track::io::USER
+            ? mixxx::BarInfo::Source::User
+            : mixxx::BarInfo::Source::Analyzer;
+    pBarInfo->phrases.reserve(proto.phrase_size());
+    for (int i = 0; i < proto.phrase_size(); i++) {
+        const auto& phrase = proto.phrase(i);
+        pBarInfo->phrases.push_back(mixxx::Phrase{
+                phrase.start_beat(),
+                phraseKindFromProto(phrase.kind()),
+                phrase.energy()});
+    }
+    std::sort(pBarInfo->phrases.begin(),
+            pBarInfo->phrases.end(),
+            [](const mixxx::Phrase& lhs, const mixxx::Phrase& rhs) {
+                return lhs.startBeat < rhs.startBeat;
+            });
+    return pBarInfo;
+}
+
 } // namespace
 
 namespace mixxx {
+
+const Phrase* BarInfo::findPhrase(int beatIndex) const {
+    const auto it = std::upper_bound(phrases.cbegin(),
+            phrases.cend(),
+            beatIndex,
+            [](int index, const Phrase& phrase) {
+                return index < phrase.startBeat;
+            });
+    if (it == phrases.cbegin()) {
+        return nullptr;
+    }
+    return &*std::prev(it);
+}
+
+int BarInfo::beatInPhrase(int beatIndex) const {
+    const Phrase* pPhrase = findPhrase(beatIndex);
+    if (pPhrase) {
+        return beatIndex - pPhrase->startBeat;
+    }
+    return positiveModulo(beatIndex - anchorBeat, defaultBeatsPerPhrase());
+}
+
+int BarInfo::phraseLengthBeats(int beatIndex) const {
+    const Phrase* pPhrase = findPhrase(beatIndex);
+    if (!pPhrase) {
+        return defaultBeatsPerPhrase();
+    }
+    const auto next = std::next(phrases.cbegin(), (pPhrase - phrases.data()) + 1);
+    if (next == phrases.cend()) {
+        return -1;
+    }
+    return next->startBeat - pPhrase->startBeat;
+}
+
+BarInfo BarInfo::scaled(double scaleFactor) const {
+    BarInfo result = *this;
+    result.anchorBeat = static_cast<int>(std::round(anchorBeat * scaleFactor));
+    for (auto& phrase : result.phrases) {
+        phrase.startBeat = static_cast<int>(std::round(phrase.startBeat * scaleFactor));
+    }
+    return result;
+}
 
 mixxx::audio::FrameDiff_t Beats::ConstIterator::beatLengthFrames() const {
     if (m_it == m_beats->m_markers.cend()) {
@@ -291,9 +410,13 @@ mixxx::BeatsPointer Beats::fromBeatGridByteArray(
     track::io::BeatGrid grid;
     audio::FramePos position;
     Bpm bpm;
+    BarInfoPointer pBarInfo;
     if (grid.ParseFromArray(byteArray.constData(), byteArray.size())) {
         position = audio::FramePos(grid.first_beat().frame_position());
         bpm = Bpm(grid.bpm().bpm());
+        if (grid.has_bar_info()) {
+            pBarInfo = barInfoFromProto(grid.bar_info());
+        }
     } else if (byteArray.size() == sizeof(BeatGridV1Data)) {
         // Legacy fallback for BeatGrid-1.0
         const auto* pBlob = reinterpret_cast<const BeatGridV1Data*>(byteArray.constData());
@@ -302,7 +425,11 @@ mixxx::BeatsPointer Beats::fromBeatGridByteArray(
     }
 
     if (position.isValid() && bpm.isValid()) {
-        return fromConstTempo(sampleRate, position, bpm, subVersion);
+        auto pBeats = fromConstTempo(sampleRate, position, bpm, subVersion);
+        if (pBeats && pBarInfo) {
+            return pBeats->withBarInfo(std::move(pBarInfo));
+        }
+        return pBeats;
     }
 
     // Failed to parse the beatgrid.
@@ -335,7 +462,20 @@ BeatsPointer Beats::fromBeatMapByteArray(
         return nullptr;
     }
 
-    return fromBeatPositions(sampleRate, beatPositions, subVersion);
+    auto pBeats = fromBeatPositions(sampleRate, beatPositions, subVersion);
+    if (pBeats && map.has_bar_info()) {
+        return pBeats->withBarInfo(barInfoFromProto(map.bar_info()));
+    }
+    return pBeats;
+}
+
+BeatsPointer Beats::withBarInfo(BarInfoPointer pBarInfo) const {
+    return BeatsPointer(new Beats(m_markers,
+            m_lastMarkerPosition,
+            m_lastMarkerBpm,
+            m_sampleRate,
+            m_subVersion,
+            std::move(pBarInfo)));
 }
 
 QByteArray Beats::toByteArray() const {
@@ -354,6 +494,9 @@ QByteArray Beats::toBeatGridByteArray() const {
             static_cast<google::protobuf::int32>(
                     m_lastMarkerPosition.toLowerFrameBoundary().value()));
     grid.mutable_bpm()->set_bpm(m_lastMarkerBpm.value());
+    if (m_pBarInfo) {
+        barInfoToProto(*m_pBarInfo, grid.mutable_bar_info());
+    }
 
     std::string output;
     grid.SerializeToString(&output);
@@ -367,6 +510,9 @@ QByteArray Beats::toBeatMapByteArray() const {
         track::io::Beat beat;
         beat.set_frame_position(static_cast<google::protobuf::int32>(position.value()));
         map.add_beat()->CopyFrom(beat);
+    }
+    if (m_pBarInfo) {
+        barInfoToProto(*m_pBarInfo, map.mutable_bar_info());
     }
 
     std::string output;
@@ -636,7 +782,8 @@ std::optional<BeatsPointer> Beats::tryTranslate(audio::FrameDiff_t offsetFrames)
             lastMarkerPosition.toLowerFrameBoundary(),
             m_lastMarkerBpm,
             m_sampleRate,
-            m_subVersion));
+            m_subVersion,
+            m_pBarInfo));
 }
 
 std::optional<BeatsPointer> Beats::tryTranslateBeats(double xBeats) const {
@@ -650,7 +797,8 @@ std::optional<BeatsPointer> Beats::tryTranslateBeats(double xBeats) const {
             lastMarkerPosition.toLowerFrameBoundary(),
             m_lastMarkerBpm,
             m_sampleRate,
-            m_subVersion));
+            m_subVersion,
+            m_pBarInfo));
 }
 
 std::optional<BeatsPointer> Beats::tryScale(BpmScale scale) const {
@@ -702,16 +850,22 @@ std::optional<BeatsPointer> Beats::tryScale(BpmScale scale) const {
 
     Bpm lastMarkerBpm = m_lastMarkerBpm * scaleFactor;
 
+    BarInfoPointer pBarInfo;
+    if (m_pBarInfo) {
+        pBarInfo = std::make_shared<BarInfo>(m_pBarInfo->scaled(scaleFactor));
+    }
+
     return BeatsPointer(new Beats(markers,
             m_lastMarkerPosition,
             lastMarkerBpm,
             m_sampleRate,
-            m_subVersion));
+            m_subVersion,
+            std::move(pBarInfo)));
 }
 
 std::optional<BeatsPointer> Beats::trySetBpm(mixxx::Bpm bpm) const {
     const auto it = cfirstmarker();
-    return BeatsPointer(new Beats({}, *it, bpm, m_sampleRate, m_subVersion));
+    return BeatsPointer(new Beats({}, *it, bpm, m_sampleRate, m_subVersion, m_pBarInfo));
 }
 
 bool Beats::isValid() const {
