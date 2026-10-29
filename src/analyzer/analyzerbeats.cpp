@@ -12,6 +12,23 @@
 #include "library/rekordbox/rekordboxconstants.h"
 #include "track/beatfactory.h"
 #include "track/track.h"
+#ifdef __ONNXRUNTIME__
+#include "analyzer/neuralanalysis.h"
+#include "analyzer/plugins/analyzerbeatthisbeats.h"
+#endif
+
+namespace {
+
+bool isBeatThisPlugin(const QString& pluginId) {
+#ifdef __ONNXRUNTIME__
+    return pluginId == mixxx::AnalyzerBeatThisBeats::pluginInfo().id();
+#else
+    Q_UNUSED(pluginId);
+    return false;
+#endif
+}
+
+} // namespace
 
 // static
 QList<mixxx::AnalyzerPluginInfo> AnalyzerBeats::availablePlugins() {
@@ -19,6 +36,9 @@ QList<mixxx::AnalyzerPluginInfo> AnalyzerBeats::availablePlugins() {
     // First one below is the default
     plugins.append(mixxx::AnalyzerQueenMaryBeats::pluginInfo());
     plugins.append(mixxx::AnalyzerSoundTouchBeats::pluginInfo());
+#ifdef __ONNXRUNTIME__
+    plugins.append(mixxx::AnalyzerBeatThisBeats::pluginInfo());
+#endif
     return plugins;
 }
 
@@ -29,8 +49,11 @@ mixxx::AnalyzerPluginInfo AnalyzerBeats::defaultPlugin() {
     return plugins.at(0);
 }
 
-AnalyzerBeats::AnalyzerBeats(UserSettingsPointer pConfig, bool enforceBpmDetection)
+AnalyzerBeats::AnalyzerBeats(UserSettingsPointer pConfig,
+        bool enforceBpmDetection,
+        std::shared_ptr<NeuralAnalysis> pNeuralAnalysis)
         : m_bpmSettings(pConfig),
+          m_pNeuralAnalysis(std::move(pNeuralAnalysis)),
           m_enforceBpmDetection(enforceBpmDetection),
           m_bPreferencesReanalyzeOldBpm(false),
           m_bPreferencesReanalyzeImported(false),
@@ -67,17 +90,7 @@ bool AnalyzerBeats::initialize(const AnalyzerTrack& track,
     m_bPreferencesReanalyzeImported = m_bpmSettings.getReanalyzeImported();
     m_bPreferencesFastAnalysis = m_bpmSettings.getFastAnalysis();
 
-    const auto plugins = availablePlugins();
-    if (!plugins.isEmpty()) {
-        m_pluginId = defaultPlugin().id();
-        QString pluginId = m_bpmSettings.getBeatPluginId();
-        for (const auto& info : plugins) {
-            if (info.id() == pluginId) {
-                m_pluginId = pluginId; // configured Plug-In available
-                break;
-            }
-        }
-    }
+    m_pluginId = availablePluginId();
 
     qDebug() << "AnalyzerBeats preference settings:"
              << "\nPlugin:" << m_pluginId
@@ -90,7 +103,8 @@ bool AnalyzerBeats::initialize(const AnalyzerTrack& track,
     m_channelCount = channelCount;
     // In fast analysis mode, skip processing after
     // kFastAnalysisSecondsToAnalyze seconds are analyzed.
-    if (m_bPreferencesFastAnalysis) {
+    // The neural network always analyzes the whole track for AnalyzerBars.
+    if (m_bPreferencesFastAnalysis && !isBeatThisPlugin(m_pluginId)) {
         m_maxFramesToProcess =
                 mixxx::kFastAnalysisSecondsToAnalyze * m_sampleRate;
     } else {
@@ -107,6 +121,10 @@ bool AnalyzerBeats::initialize(const AnalyzerTrack& track,
             m_pPlugin = std::make_unique<mixxx::AnalyzerQueenMaryBeats>();
         } else if (m_pluginId == mixxx::AnalyzerSoundTouchBeats::pluginInfo().id()) {
             m_pPlugin = std::make_unique<mixxx::AnalyzerSoundTouchBeats>();
+#ifdef __ONNXRUNTIME__
+        } else if (isBeatThisPlugin(m_pluginId)) {
+            m_pPlugin = std::make_unique<mixxx::AnalyzerBeatThisBeats>(m_pNeuralAnalysis);
+#endif
         } else {
             // This must not happen, because we have already verified above
             // that the PlugInId is valid
@@ -128,6 +146,23 @@ bool AnalyzerBeats::initialize(const AnalyzerTrack& track,
     return bShouldAnalyze;
 }
 
+QString AnalyzerBeats::availablePluginId() const {
+    const QString pluginId = m_bpmSettings.getBeatPluginId();
+#ifdef __ONNXRUNTIME__
+    if (isBeatThisPlugin(pluginId) &&
+            !(m_pNeuralAnalysis && m_pNeuralAnalysis->isAvailable())) {
+        qWarning() << "The model of the Beat This! neural network is not installed";
+        return defaultPlugin().id();
+    }
+#endif
+    for (const auto& info : availablePlugins()) {
+        if (info.id() == pluginId) {
+            return pluginId; // configured Plug-In available
+        }
+    }
+    return defaultPlugin().id();
+}
+
 bool AnalyzerBeats::shouldAnalyze(TrackPointer pTrack) const {
     bool bpmLock = pTrack->isBpmLocked();
     if (bpmLock) {
@@ -135,10 +170,7 @@ bool AnalyzerBeats::shouldAnalyze(TrackPointer pTrack) const {
         return false;
     }
 
-    QString pluginID = m_bpmSettings.getBeatPluginId();
-    if (pluginID.isEmpty()) {
-        pluginID = defaultPlugin().id();
-    }
+    const QString pluginID = availablePluginId();
 
     // If the track already has a Beats object then we need to decide whether to
     // analyze this track or not.

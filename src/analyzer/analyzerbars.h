@@ -1,15 +1,14 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "analyzer/analyzer.h"
 #include "preferences/usersettings.h"
 #include "track/beats.h"
 
-namespace mixxx {
-class DownbeatDetector;
-} // namespace mixxx
+class NeuralAnalysis;
 
 /// Detects the bar and phrase structure (downbeats and phrases) on top of
 /// the beats of a track.
@@ -18,11 +17,12 @@ class DownbeatDetector;
 /// the beats and on the N60dBSound cue stored by those analyzers.
 ///
 /// If Mixxx is built with ONNX Runtime and the model is installed, the
-/// downbeats are detected by a neural network. Otherwise the first beat
-/// of the audible signal is assumed to be a downbeat.
+/// downbeats are detected by a neural network (`pNeuralAnalysis`). Otherwise
+/// the first beat of the audible signal is assumed to be a downbeat.
 class AnalyzerBars : public Analyzer {
   public:
-    explicit AnalyzerBars(UserSettingsPointer pConfig);
+    explicit AnalyzerBars(UserSettingsPointer pConfig,
+            std::shared_ptr<NeuralAnalysis> pNeuralAnalysis = nullptr);
     ~AnalyzerBars() override;
 
     bool initialize(const AnalyzerTrack& track,
@@ -37,6 +37,26 @@ class AnalyzerBars : public Analyzer {
     /// is a downbeat that starts a phrase. Returns nullptr if the track
     /// has no beats.
     static mixxx::BarInfoPointer guessBarInfoFromFirstSound(const Track& track);
+
+    struct BeatPhase {
+        /// Frames by which the beats need to be moved
+        mixxx::audio::FrameDiff_t offset;
+        /// Mean beat probability at the moved beats and at the original beats
+        double activation;
+        double originalActivation;
+    };
+
+    /// Finds the phase of a beat grid with constant tempo that matches the
+    /// beat probabilities of the neural network best, e.g. if the beat
+    /// detector placed the beats some milliseconds late or on the offbeats.
+    /// Returns std::nullopt for beats without constant tempo.
+    static std::optional<BeatPhase> findBeatPhase(const mixxx::Beats& beats,
+            const std::vector<float>& beatLogits,
+            double framesPerSecond);
+
+    /// Whether the beats should be moved by the result of findBeatPhase()
+    static bool shouldCorrectBeatPhase(const BeatPhase& phase,
+            mixxx::audio::SampleRate sampleRate);
 
     /// Chooses the downbeats among the beats by summing up the downbeat
     /// probabilities of each position in the bar. The phrases start at the
@@ -69,11 +89,12 @@ class AnalyzerBars : public Analyzer {
     static void resetCuesFromSections(Track* pTrack);
 
   private:
-    QString modelPath() const;
     bool isNeuralDetectionAvailable() const;
     QString currentAnalyzerVersion() const;
     bool hasCurrentBarInfo(const mixxx::Beats& beats) const;
 
     UserSettingsPointer m_pConfig;
-    std::unique_ptr<mixxx::DownbeatDetector> m_pDetector;
+    const std::shared_ptr<NeuralAnalysis> m_pNeuralAnalysis;
+    /// To find out whether AnalyzerBeats has detected new beats
+    mixxx::BeatsPointer m_pBeatsBeforeAnalysis;
 };

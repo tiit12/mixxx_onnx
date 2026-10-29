@@ -17,6 +17,8 @@
 #include "util/samplebuffer.h"
 #include "util/workerthread.h"
 
+class NeuralAnalysis;
+
 enum AnalyzerModeFlags {
     None = 0x00,
     WithBeats = 0x01,
@@ -117,6 +119,8 @@ class AnalyzerThread : public WorkerThread {
     // run() by the worker thread.
 
     std::vector<AnalyzerWithState> m_analyzers;
+    /// Shared by the analyzers, only with ONNX Runtime
+    std::shared_ptr<NeuralAnalysis> m_pNeuralAnalysis;
 
     mixxx::SampleBuffer m_sampleBuffer;
 

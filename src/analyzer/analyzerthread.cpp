@@ -10,6 +10,9 @@
 #include "analyzer/analyzersilence.h"
 #include "analyzer/analyzerwaveform.h"
 #include "analyzer/constants.h"
+#ifdef __ONNXRUNTIME__
+#include "analyzer/neuralanalysis.h"
+#endif
 #include "library/dao/analysisdao.h"
 #include "moc_analyzerthread.cpp"
 #include "sources/audiosourcestereoproxy.h"
@@ -113,11 +116,16 @@ void AnalyzerThread::doRun() {
     // BPM detection might be disabled in the config, but can be overridden
     // and enabled by explicitly setting the mode flag.
     const bool enforceBpmDetection = (m_modeFlags & AnalyzerModeFlags::WithBeats) != 0;
-    m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerBeats>(m_pConfig, enforceBpmDetection)));
+#ifdef __ONNXRUNTIME__
+    m_pNeuralAnalysis = std::make_shared<NeuralAnalysis>(m_pConfig);
+#endif
+    m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerBeats>(
+            m_pConfig, enforceBpmDetection, m_pNeuralAnalysis)));
     m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerKey>(m_pConfig)));
     m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerSilence>(m_pConfig)));
     // Depends on the results of AnalyzerBeats and AnalyzerSilence
-    m_analyzers.push_back(AnalyzerWithState(std::make_unique<AnalyzerBars>(m_pConfig)));
+    m_analyzers.push_back(AnalyzerWithState(
+            std::make_unique<AnalyzerBars>(m_pConfig, m_pNeuralAnalysis)));
     DEBUG_ASSERT(!m_analyzers.empty());
     kLogger.debug() << "Activated" << m_analyzers.size() << "analyzers";
 
@@ -149,6 +157,9 @@ void AnalyzerThread::doRun() {
         }
 
         bool processTrack = false;
+#ifdef __ONNXRUNTIME__
+        m_pNeuralAnalysis->reset();
+#endif
         for (auto&& analyzer : m_analyzers) {
             // Make sure not to short-circuit initialize(...)
             if (analyzer.initialize(
@@ -159,6 +170,12 @@ void AnalyzerThread::doRun() {
                 processTrack = true;
             }
         }
+#ifdef __ONNXRUNTIME__
+        if (m_pNeuralAnalysis->isRequested()) {
+            m_pNeuralAnalysis->start(audioSource->getSignalInfo().getSampleRate(),
+                    audioSource->getSignalInfo().getChannelCount());
+        }
+#endif
 
         if (processTrack) {
             const auto analysisResult = analyzeAudioSource(audioSource);
@@ -307,6 +324,12 @@ AnalyzerThread::AnalysisResult AnalyzerThread::analyzeAudioSource(
                         readableSampleFrames.readableData(),
                         readableSampleFrames.readableLength());
             }
+#ifdef __ONNXRUNTIME__
+            if (m_pNeuralAnalysis->isRequested()) {
+                m_pNeuralAnalysis->processSamples(readableSampleFrames.readableData(),
+                        readableSampleFrames.readableLength());
+            }
+#endif
         }
 
         // Don't check again for paused/stopped again and simply finish

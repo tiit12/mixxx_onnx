@@ -1,6 +1,5 @@
 #include "analyzer/analyzerbars.h"
 
-#include <QFileInfo>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -13,6 +12,7 @@
 #include "track/track.h"
 #include "util/logger.h"
 #ifdef __ONNXRUNTIME__
+#include "analyzer/neuralanalysis.h"
 #include "analyzer/plugins/downbeatdetector.h"
 #endif
 
@@ -28,10 +28,17 @@ constexpr double kFirstBeatToleranceBeats = 0.25;
 // (+/- 40 ms at 50 frames per second)
 constexpr int kDownbeatSearchFrames = 2;
 
+// The phase of the beat grid is searched in steps of 1 ms
+constexpr double kBeatPhaseStepSeconds = 0.001;
+// Smaller phase errors are inaudible
+constexpr double kMinBeatPhaseCorrectionSeconds = 0.005;
+// The beat probabilities at the moved beats must be this high, i.e. the
+// neural network must clearly hear the beats
+constexpr double kMinBeatPhaseActivation = 0.3;
+
 // Increment if the results of the analysis change, to re-analyze the tracks
 const QString kFirstSoundAnalyzerVersion = QStringLiteral("first-sound-1");
 const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-6");
-const QString kModelFile = QStringLiteral("models/beat_this_small.onnx");
 
 const QString kMixAssistantGroup = QStringLiteral("[MixAssistant]");
 
@@ -162,19 +169,17 @@ std::vector<std::size_t> chooseSectionsForHotcues(
 
 } // namespace
 
-AnalyzerBars::AnalyzerBars(UserSettingsPointer pConfig)
-        : m_pConfig(pConfig) {
+AnalyzerBars::AnalyzerBars(
+        UserSettingsPointer pConfig, std::shared_ptr<NeuralAnalysis> pNeuralAnalysis)
+        : m_pConfig(pConfig),
+          m_pNeuralAnalysis(std::move(pNeuralAnalysis)) {
 }
 
 AnalyzerBars::~AnalyzerBars() = default;
 
-QString AnalyzerBars::modelPath() const {
-    return m_pConfig->getResourcePath() + kModelFile;
-}
-
 bool AnalyzerBars::isNeuralDetectionAvailable() const {
 #ifdef __ONNXRUNTIME__
-    return QFileInfo::exists(modelPath());
+    return m_pNeuralAnalysis && m_pNeuralAnalysis->isAvailable();
 #else
     return false;
 #endif
@@ -190,6 +195,80 @@ bool AnalyzerBars::hasCurrentBarInfo(const mixxx::Beats& beats) const {
     return pBarInfo && pBarInfo->analyzerVersion == currentAnalyzerVersion();
 }
 
+// static
+std::optional<AnalyzerBars::BeatPhase> AnalyzerBars::findBeatPhase(
+        const mixxx::Beats& beats,
+        const std::vector<float>& beatLogits,
+        double framesPerSecond) {
+    if (!beats.hasConstantTempo() || beatLogits.empty() || framesPerSecond <= 0) {
+        return std::nullopt;
+    }
+    const double sampleRate = beats.getSampleRate().value();
+    std::vector<double> activation(beatLogits.size());
+    std::transform(beatLogits.cbegin(), beatLogits.cend(), activation.begin(), sigmoid);
+    const auto lastFrame = static_cast<double>(activation.size() - 1);
+    const auto activationAt = [&](double frame) {
+        if (frame < 0 || frame > lastFrame) {
+            return 0.0;
+        }
+        const auto index = static_cast<std::size_t>(frame);
+        const double fraction = frame - index;
+        if (fraction == 0) {
+            return activation[index];
+        }
+        return activation[index] * (1 - fraction) + activation[index + 1] * fraction;
+    };
+
+    // The positions of the beats in frames of the beat logits
+    std::vector<double> beatFrames;
+    auto it = beats.iteratorFrom(mixxx::audio::kStartFramePos);
+    if (it == beats.cend()) {
+        return std::nullopt;
+    }
+    const double beatLength = it.beatLengthFrames() * framesPerSecond / sampleRate;
+    for (; it != beats.cend(); ++it) {
+        const double frame = it->value() * framesPerSecond / sampleRate;
+        if (frame > lastFrame) {
+            break;
+        }
+        beatFrames.push_back(frame);
+    }
+    if (beatFrames.empty() || beatLength <= 0) {
+        return std::nullopt;
+    }
+    const auto meanActivation = [&](double offset) {
+        double sum = 0;
+        for (const double frame : beatFrames) {
+            sum += activationAt(frame + offset);
+        }
+        return sum / beatFrames.size();
+    };
+
+    // Search within half a beat in both directions, which also finds beat
+    // grids on the offbeats
+    const double step = kBeatPhaseStepSeconds * framesPerSecond;
+    double bestOffset = 0;
+    double bestActivation = meanActivation(0);
+    const double originalActivation = bestActivation;
+    for (double offset = -beatLength / 2; offset < beatLength / 2; offset += step) {
+        const double value = meanActivation(offset);
+        if (value > bestActivation) {
+            bestActivation = value;
+            bestOffset = offset;
+        }
+    }
+    return BeatPhase{bestOffset * sampleRate / framesPerSecond,
+            bestActivation,
+            originalActivation};
+}
+
+// static
+bool AnalyzerBars::shouldCorrectBeatPhase(
+        const BeatPhase& phase, mixxx::audio::SampleRate sampleRate) {
+    return std::abs(phase.offset) >= kMinBeatPhaseCorrectionSeconds * sampleRate.value() &&
+            phase.activation >= kMinBeatPhaseActivation;
+}
+
 bool AnalyzerBars::initialize(const AnalyzerTrack& track,
         mixxx::audio::SampleRate sampleRate,
         mixxx::audio::ChannelCount channelCount,
@@ -201,49 +280,65 @@ bool AnalyzerBars::initialize(const AnalyzerTrack& track,
     if (pBeats && hasCurrentBarInfo(*pBeats)) {
         return false;
     }
-#ifdef __ONNXRUNTIME__
-    if (isNeuralDetectionAvailable()) {
-        m_pDetector = std::make_unique<mixxx::DownbeatDetector>();
-        if (!m_pDetector->initialize(modelPath(), sampleRate, channelCount)) {
-            m_pDetector.reset();
-        }
-    }
-#else
+    m_pBeatsBeforeAnalysis = pBeats;
     Q_UNUSED(sampleRate);
     Q_UNUSED(channelCount);
+#ifdef __ONNXRUNTIME__
+    if (isNeuralDetectionAvailable()) {
+        m_pNeuralAnalysis->request();
+    }
 #endif
     return true;
 }
 
 bool AnalyzerBars::processSamples(const CSAMPLE* pIn, SINT count) {
-#ifdef __ONNXRUNTIME__
-    if (m_pDetector && !m_pDetector->processSamples(pIn, count)) {
-        // Fall back to the first sound heuristic
-        m_pDetector.reset();
-    }
-#else
+    // The samples are processed by NeuralAnalysis
     Q_UNUSED(pIn);
     Q_UNUSED(count);
-#endif
     return true;
 }
 
 void AnalyzerBars::storeResults(TrackPointer pTrack) {
-    const mixxx::BeatsPointer pBeats = pTrack->getBeats();
+    mixxx::BeatsPointer pBeats = pTrack->getBeats();
     if (!pBeats || hasCurrentBarInfo(*pBeats)) {
         return;
     }
+
+#ifdef __ONNXRUNTIME__
+    // Falls back to the first sound heuristic if the analysis has failed
+    const mixxx::DownbeatDetector* pDetector =
+            m_pNeuralAnalysis ? m_pNeuralAnalysis->results() : nullptr;
+    const bool detected = pDetector != nullptr;
+    // Only beats that have just been detected by AnalyzerBeats are corrected,
+    // beats adjusted by the user are kept.
+    if (detected && pBeats != m_pBeatsBeforeAnalysis) {
+        const auto phase = findBeatPhase(*pBeats,
+                pDetector->beatLogits(),
+                mixxx::DownbeatDetector::kFramesPerSecond);
+        if (phase) {
+            const bool correct = shouldCorrectBeatPhase(*phase, pBeats->getSampleRate());
+            kLogger.info() << "Beat phase offset"
+                           << phase->offset / pBeats->getSampleRate().value() * 1000
+                           << "ms, beat probability" << phase->originalActivation
+                           << "->" << phase->activation
+                           << (correct ? "corrected" : "not corrected");
+            if (correct) {
+                const auto translated = pBeats->tryTranslate(phase->offset);
+                if (translated && pTrack->trySetBeats(*translated)) {
+                    pBeats = *translated;
+                }
+            }
+        }
+    }
+#else
+    const bool detected = false;
+#endif
 
     const mixxx::BarInfoPointer pUserBarInfo =
             pBeats->getBarInfo() &&
                     pBeats->getBarInfo()->source == mixxx::BarInfo::Source::User
             ? pBeats->getBarInfo()
             : nullptr;
-#ifdef __ONNXRUNTIME__
-    const bool detected = m_pDetector && m_pDetector->finalize();
-#else
-    const bool detected = false;
-#endif
 
     std::shared_ptr<mixxx::BarInfo> pBarInfo;
     if (pUserBarInfo) {
@@ -256,7 +351,7 @@ void AnalyzerBars::storeResults(TrackPointer pTrack) {
 #ifdef __ONNXRUNTIME__
         if (detected) {
             pDetected = barInfoFromDownbeatLogits(*pBeats,
-                    m_pDetector->downbeatLogits(),
+                    pDetector->downbeatLogits(),
                     mixxx::DownbeatDetector::kFramesPerSecond,
                     firstSoundPosition(*pTrack));
         }
@@ -273,7 +368,7 @@ void AnalyzerBars::storeResults(TrackPointer pTrack) {
 #ifdef __ONNXRUNTIME__
     if (detected) {
         pBarInfo->phrases = mixxx::PhraseAnalyzer::analyze(
-                *pBeats, *pBarInfo, m_pDetector->bandEnergies());
+                *pBeats, *pBarInfo, pDetector->bandEnergies());
     }
 #endif
     kLogger.debug() << "Bar anchor at beat" << pBarInfo->anchorBeat << "with"
@@ -377,7 +472,7 @@ void AnalyzerBars::setupCuesFromSections(Track* pTrack,
 }
 
 void AnalyzerBars::cleanup() {
-    m_pDetector.reset();
+    m_pBeatsBeforeAnalysis.reset();
 }
 
 // static

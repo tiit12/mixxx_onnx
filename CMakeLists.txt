@@ -3676,7 +3676,13 @@ option(ONNXRUNTIME "Neural network downbeat detection (ONNX Runtime)" OFF)
 if(ONNXRUNTIME)
   find_package(OnnxRuntime REQUIRED)
   target_link_libraries(mixxx-lib PRIVATE OnnxRuntime::OnnxRuntime)
-  target_sources(mixxx-lib PRIVATE src/analyzer/plugins/downbeatdetector.cpp)
+  target_sources(
+    mixxx-lib
+    PRIVATE
+      src/analyzer/neuralanalysis.cpp
+      src/analyzer/plugins/analyzerbeatthisbeats.cpp
+      src/analyzer/plugins/downbeatdetector.cpp
+  )
   target_compile_definitions(mixxx-lib PUBLIC __ONNXRUNTIME__)
   if(BUILD_TESTING)
     target_sources(mixxx-test PRIVATE src/test/downbeatdetectortest.cpp)

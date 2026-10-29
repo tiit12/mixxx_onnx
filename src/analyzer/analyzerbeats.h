@@ -9,11 +9,16 @@
 #include "preferences/beatdetectionsettings.h"
 #include "preferences/usersettings.h"
 
+class NeuralAnalysis;
+
 class AnalyzerBeats : public Analyzer {
   public:
+    /// `pNeuralAnalysis` is required for the Beat This! plugin, which is
+    /// replaced by the default plugin otherwise.
     explicit AnalyzerBeats(
             UserSettingsPointer pConfig,
-            bool enforceBpmDetection = false);
+            bool enforceBpmDetection = false,
+            std::shared_ptr<NeuralAnalysis> pNeuralAnalysis = nullptr);
     ~AnalyzerBeats() override = default;
 
     static QList<mixxx::AnalyzerPluginInfo> availablePlugins();
@@ -28,11 +33,14 @@ class AnalyzerBeats : public Analyzer {
     void cleanup() override;
 
   private:
+    /// The configured plugin, or the default plugin if it is not available
+    QString availablePluginId() const;
     bool shouldAnalyze(TrackPointer pTrack) const;
     static QHash<QString, QString> getExtraVersionInfo(
             const QString& pluginId, bool bPreferencesFastAnalysis);
 
     BeatDetectionSettings m_bpmSettings;
+    const std::shared_ptr<NeuralAnalysis> m_pNeuralAnalysis;
     std::unique_ptr<mixxx::AnalyzerBeatsPlugin> m_pPlugin;
     const bool m_enforceBpmDetection;
     QString m_pluginId;

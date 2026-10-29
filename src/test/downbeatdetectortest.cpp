@@ -1,15 +1,24 @@
 #include <dsp/rateconversion/Resampler.h>
 #include <gtest/gtest.h>
 
+#include <QDir>
 #include <QFile>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 #include "analyzer/analyzerbars.h"
+#include "analyzer/constants.h"
+#include "analyzer/plugins/analyzerbeatthisbeats.h"
+#include "analyzer/plugins/analyzerqueenmarybeats.h"
 #include "analyzer/plugins/downbeatdetector.h"
+#include "sources/soundsourceproxy.h"
 #include "test/mixxxtest.h"
+#include "track/beatfactory.h"
 #include "track/beats.h"
+#include "track/track.h"
+#include "util/samplebuffer.h"
 
 namespace {
 
@@ -156,6 +165,20 @@ class DownbeatDetectorTest : public MixxxTest {
         return deviation;
     }
 
+    /// Offset found by AnalyzerBars::findBeatPhase() in seconds for a beat
+    /// grid that starts at `firstBeatSeconds`
+    AnalyzerBars::BeatPhase findBeatPhase(int sampleRate, double firstBeatSeconds) {
+        const auto pBeats = mixxx::Beats::fromConstTempo(
+                mixxx::audio::SampleRate(sampleRate),
+                mixxx::audio::FramePos(firstBeatSeconds * sampleRate),
+                mixxx::Bpm(kBpm));
+        const auto phase = AnalyzerBars::findBeatPhase(*pBeats,
+                m_detector.beatLogits(),
+                mixxx::DownbeatDetector::kFramesPerSecond);
+        EXPECT_TRUE(phase.has_value());
+        return phase.value_or(AnalyzerBars::BeatPhase{});
+    }
+
     void expectDownbeatsOnFirstBeat(int sampleRate) {
         const auto pBeats = mixxx::Beats::fromConstTempo(
                 mixxx::audio::SampleRate(sampleRate),
@@ -188,6 +211,131 @@ TEST_F(DownbeatDetectorTest, MatchesReferenceWithResampling) {
     EXPECT_LT(deviation.max, 1.0);
     EXPECT_LE(deviation.decisionMismatches, 10);
     expectDownbeatsOnFirstBeat(44100);
+}
+
+TEST_F(DownbeatDetectorTest, BeatPhase) {
+    constexpr int kSampleRate = 44100;
+    runAndCompare(kSampleRate);
+    const auto sampleRate = mixxx::audio::SampleRate(kSampleRate);
+    constexpr double kToleranceSeconds = 0.003;
+
+    // Correct beats
+    auto phase = findBeatPhase(kSampleRate, 0);
+    EXPECT_NEAR(0, phase.offset / kSampleRate, kToleranceSeconds);
+    EXPECT_FALSE(AnalyzerBars::shouldCorrectBeatPhase(phase, sampleRate));
+
+    // Beats 30 ms late
+    phase = findBeatPhase(kSampleRate, 0.03);
+    EXPECT_NEAR(-0.03, phase.offset / kSampleRate, kToleranceSeconds);
+    EXPECT_GT(phase.activation, phase.originalActivation);
+    EXPECT_TRUE(AnalyzerBars::shouldCorrectBeatPhase(phase, sampleRate));
+
+    // Beats on the offbeats
+    const double halfBeatSeconds = 30.0 / kBpm;
+    phase = findBeatPhase(kSampleRate, halfBeatSeconds);
+    EXPECT_NEAR(halfBeatSeconds, std::abs(phase.offset) / kSampleRate, kToleranceSeconds);
+    EXPECT_TRUE(AnalyzerBars::shouldCorrectBeatPhase(phase, sampleRate));
+}
+
+TEST_F(DownbeatDetectorTest, BeatThisBeats) {
+    constexpr int kSampleRate = 44100;
+    runAndCompare(kSampleRate);
+    const auto sampleRate = mixxx::audio::SampleRate(kSampleRate);
+    const auto beats = mixxx::AnalyzerBeatThisBeats::beatsFromLogits(m_detector.beatLogits(),
+            mixxx::DownbeatDetector::kFramesPerSecond,
+            sampleRate);
+    // All beats of the test signal, within half a frame of the logits
+    const double beatFrames = 60.0 / kBpm * kSampleRate;
+    EXPECT_NEAR(kSeconds * kBpm / 60, beats.size(), 2);
+    for (const auto& beat : beats) {
+        const double offset = beat.value() - std::round(beat.value() / beatFrames) * beatFrames;
+        EXPECT_NEAR(0, offset / kSampleRate, 0.01) << beat.value() / kSampleRate;
+    }
+
+    const auto pBeats = BeatFactory::makePreferredBeats(beats, {}, true, sampleRate);
+    ASSERT_NE(nullptr, pBeats);
+    EXPECT_DOUBLE_EQ(kBpm,
+            pBeats->getBpmInRange(mixxx::audio::kStartFramePos,
+                          mixxx::audio::FramePos(kSeconds * kSampleRate))
+                    .value());
+    const double firstBeat = pBeats->iteratorFrom(mixxx::audio::kStartFramePos)->value();
+    const double phaseError =
+            std::fmod(firstBeat + beatFrames / 2, beatFrames) - beatFrames / 2;
+    EXPECT_NEAR(0, phaseError / kSampleRate, 0.003);
+}
+
+/// Development tool: compares the beats detected by Mixxx with the beat
+/// probabilities of the neural network for the audio files in the directory
+/// BEAT_PHASE_DIR, like the analysis of the tracks.
+TEST_F(DownbeatDetectorTest, DISABLED_BeatPhaseFiles) {
+    ASSERT_TRUE(SoundSourceProxy::isFileTypeSupported(QStringLiteral("mp3")) ||
+            SoundSourceProxy::registerProviders());
+    const QDir dir(qEnvironmentVariable("BEAT_PHASE_DIR"));
+    const QStringList files = dir.entryList(
+            {QStringLiteral("*.mp3"), QStringLiteral("*.flac"), QStringLiteral("*.wav")},
+            QDir::Files);
+    ASSERT_FALSE(files.isEmpty()) << "Set BEAT_PHASE_DIR";
+    for (const QString& fileName : files) {
+        const TrackPointer pTrack = Track::newTemporary(dir.filePath(fileName));
+        mixxx::AudioSource::OpenParams openParams;
+        openParams.setChannelCount(mixxx::audio::ChannelCount::stereo());
+        const auto pAudioSource = SoundSourceProxy(pTrack).openAudioSource(openParams);
+        ASSERT_NE(nullptr, pAudioSource) << fileName.toStdString();
+        const auto sampleRate = pAudioSource->getSignalInfo().getSampleRate();
+
+        mixxx::AnalyzerQueenMaryBeats beatDetector;
+        ASSERT_TRUE(beatDetector.initialize(sampleRate));
+        mixxx::DownbeatDetector downbeatDetector;
+        ASSERT_TRUE(downbeatDetector.initialize(
+                config()->getResourcePath() + QStringLiteral("models/beat_this_small.onnx"),
+                sampleRate,
+                mixxx::audio::ChannelCount::stereo()));
+        mixxx::SampleBuffer buffer(2 * mixxx::kAnalysisFramesPerChunk);
+        mixxx::IndexRange remaining = pAudioSource->frameIndexRange();
+        while (!remaining.empty()) {
+            const auto chunk = remaining.splitAndShrinkFront(
+                    std::min(mixxx::kAnalysisFramesPerChunk, remaining.length()));
+            const auto readable = pAudioSource->readSampleFrames(mixxx::WritableSampleFrames(
+                    chunk, mixxx::SampleBuffer::WritableSlice(buffer)));
+            const auto samples = readable.readableSlice();
+            ASSERT_TRUE(beatDetector.processSamples(samples.data(), samples.length()));
+            ASSERT_TRUE(downbeatDetector.processSamples(samples.data(), samples.length()));
+        }
+        ASSERT_TRUE(beatDetector.finalize());
+        ASSERT_TRUE(downbeatDetector.finalize());
+
+        std::printf("%s\n", fileName.toStdString().c_str());
+        const auto printBeats = [&](const char* pName,
+                                        const QVector<mixxx::audio::FramePos>& beats) {
+            // Like AnalyzerBeats
+            const auto pBeats = BeatFactory::makePreferredBeats(beats, {}, true, sampleRate);
+            ASSERT_NE(nullptr, pBeats);
+            const auto phase = AnalyzerBars::findBeatPhase(*pBeats,
+                    downbeatDetector.beatLogits(),
+                    mixxx::DownbeatDetector::kFramesPerSecond);
+            ASSERT_TRUE(phase.has_value());
+            std::printf(
+                    "  %-11s %.3f BPM, first beat %.4f s, phase offset %+.1f ms, "
+                    "beat probability %.2f -> %.2f%s\n",
+                    pName,
+                    pBeats->getBpmInRange(mixxx::audio::kStartFramePos,
+                                  mixxx::audio::FramePos(pAudioSource->frameLength()))
+                            .value(),
+                    pBeats->iteratorFrom(mixxx::audio::kStartFramePos)->value() /
+                            sampleRate.value(),
+                    phase->offset / sampleRate.value() * 1000,
+                    phase->originalActivation,
+                    phase->activation,
+                    AnalyzerBars::shouldCorrectBeatPhase(*phase, sampleRate)
+                            ? ", corrected"
+                            : "");
+        };
+        printBeats("Queen Mary", beatDetector.getBeats());
+        printBeats("Beat This!",
+                mixxx::AnalyzerBeatThisBeats::beatsFromLogits(downbeatDetector.beatLogits(),
+                        mixxx::DownbeatDetector::kFramesPerSecond,
+                        sampleRate));
+    }
 }
 
 } // namespace

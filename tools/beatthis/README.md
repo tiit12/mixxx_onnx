@@ -8,9 +8,26 @@ waveform:
 - white lines: downbeats (first beat of a bar)
 - orange lines: phrase starts (every 8 bars = 32 beats)
 
-The neural network only decides which beat of the existing Mixxx beat grid is
-the downbeat. Without ONNX Runtime (or without the model file) the first beat
+The neural network decides which beat of the Mixxx beat grid is the
+downbeat. Without ONNX Runtime (or without the model file) the first beat
 after the initial silence is used instead.
+
+## Beat detection
+
+*Preferences → Beat Detection → "Beat This! Neural Network"* detects the
+beats (BPM and beat grid) with the same neural network instead of the Queen
+Mary beat tracker. It finds the correct tempo of drum and bass (175 instead
+of 87.5 BPM) and does not place the grid on the offbeats. The network runs
+only once per track for the beats and the phrases, so it is not slower than
+the Queen Mary beat tracker plus the phrase analysis.
+
+Already analyzed tracks keep their beats. To analyze them again, enable
+*Re-analyze beats when settings change* or use *Analyze → Reanalyze* in the
+context menu of the library.
+
+With the Queen Mary beat tracker, newly detected beat grids are moved to the
+beats of the neural network if they are off by 5 ms or more, e.g. on the
+offbeats. Beat grids adjusted by the user are not changed.
 
 ## Building on Ubuntu (Ubuntu Studio)
 
