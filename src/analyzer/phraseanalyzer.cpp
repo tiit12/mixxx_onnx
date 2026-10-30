@@ -1,9 +1,12 @@
 #include "analyzer/phraseanalyzer.h"
 
+#include <QStringList>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 #include "util/logger.h"
 
@@ -82,6 +85,13 @@ constexpr int kPreDropMaxBars = 16;
 /// The bass level of a section is 0 if its bass is this many units (15 dB)
 /// below the strongest bass of the track.
 constexpr double kBassLevelRange = 2.5;
+
+/// The phrase start is searched where the mean features of this many bars
+/// change most
+constexpr int kPhraseChangeBars = 2;
+/// The phrases start at another bar than the first downbeat, if the sound
+/// changes this much more at that bar of the phrases
+constexpr double kMinPhraseShiftRatio = 1.25;
 
 using BarFeatures = std::array<double, kNumBands>;
 using SegmentFeatures = std::array<double, kNumSegmentFeatures>;
@@ -251,8 +261,19 @@ QString PhraseAnalyzer::sectionName(PhraseKind kind) {
     return phraseKindName(kind);
 }
 
-// static
-std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
+namespace {
+
+struct BarData {
+    /// Beat index of the first bar
+    int firstBarBeat;
+    std::vector<BarFeatures> normalized;
+    std::vector<SegmentFeatures> weighted;
+    std::vector<double> variation;
+};
+
+/// The features of all bars of the track, from the first downbeat at or
+/// after the start of the track
+std::optional<BarData> analyzeBars(const Beats& beats,
         const BarInfo& barInfo,
         const BandEnergies& energies) {
     const int beatsPerBar = barInfo.beatsPerBar;
@@ -260,15 +281,14 @@ std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
     if (energies.framesPerSecond <= 0 || numFrames == 0 ||
             energies.mid.size() != energies.low.size() ||
             energies.high.size() != energies.low.size()) {
-        return {};
+        return std::nullopt;
     }
     const double framesPerBeatPosition =
             energies.framesPerSecond / beats.getSampleRate().value();
 
-    // The first downbeat at or after the start of the track
     const auto firstBeatIt = beats.iteratorFrom(audio::kStartFramePos);
     if (firstBeatIt == beats.cend()) {
-        return {};
+        return std::nullopt;
     }
     const int firstBeat = beats.beatIndex(firstBeatIt);
     const int firstBarBeat = firstBeat +
@@ -315,7 +335,7 @@ std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
     }
     const auto numBars = static_cast<int>(barDb.size());
     if (numBars < 4 * kBarsPerBlock) {
-        return {};
+        return std::nullopt;
     }
 
     // Variation of the spectrum from bar to bar, relative to the median
@@ -354,6 +374,73 @@ std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
             weighted[bar][band] = normalized[bar][band] * kBandWeights[band];
         }
     }
+    return BarData{firstBarBeat, std::move(normalized), std::move(weighted), std::move(variation)};
+}
+
+} // namespace
+
+// static
+int PhraseAnalyzer::findPhraseAnchor(const Beats& beats,
+        const BarInfo& barInfo,
+        const BandEnergies& energies) {
+    const std::optional<BarData> bars = analyzeBars(beats, barInfo, energies);
+    if (!bars) {
+        return barInfo.anchorBeat;
+    }
+    const auto& weighted = bars->weighted;
+    const auto numBars = static_cast<int>(weighted.size());
+
+    // How much the sound changes at the start of each bar, compared to the
+    // bars before. Several bars are compared, so that fills of a single bar
+    // count less than the changes between the sections.
+    std::vector<double> change(numBars, 0.0);
+    for (int bar = kPhraseChangeBars; bar + kPhraseChangeBars <= numBars; ++bar) {
+        for (int band = 0; band < kNumBands; ++band) {
+            double before = 0;
+            double after = 0;
+            for (int i = 0; i < kPhraseChangeBars; ++i) {
+                before += weighted[bar - 1 - i][band];
+                after += weighted[bar + i][band];
+            }
+            change[bar] += std::abs(after - before) / kPhraseChangeBars;
+        }
+    }
+
+    // The sections of dance music change at the phrase starts
+    const int anchorBar = (barInfo.anchorBeat - bars->firstBarBeat) / barInfo.beatsPerBar;
+    std::array<double, kDefaultBarsPerPhrase> scores{};
+    for (int bar = 0; bar < numBars; ++bar) {
+        scores[BarInfo::positiveModulo(bar - anchorBar, kDefaultBarsPerPhrase)] += change[bar];
+    }
+    const auto best = std::max_element(scores.cbegin(), scores.cend());
+    const auto shiftBars = static_cast<int>(best - scores.cbegin());
+    QStringList scoreTexts;
+    for (const double score : scores) {
+        scoreTexts.append(QString::number(score, 'f', 1));
+    }
+    kLogger.info() << "Phrase start scores per bar:" << scoreTexts.join(QStringLiteral(" "));
+    // Keep the first downbeat as phrase start, unless the sections clearly
+    // change elsewhere, e.g. after a pickup bar at the start of the track
+    if (*best < kMinPhraseShiftRatio * scores[0]) {
+        return barInfo.anchorBeat;
+    }
+    return barInfo.anchorBeat + shiftBars * barInfo.beatsPerBar;
+}
+
+// static
+std::vector<Phrase> PhraseAnalyzer::analyze(const Beats& beats,
+        const BarInfo& barInfo,
+        const BandEnergies& energies) {
+    const std::optional<BarData> bars = analyzeBars(beats, barInfo, energies);
+    if (!bars) {
+        return {};
+    }
+    const int beatsPerBar = barInfo.beatsPerBar;
+    const int firstBarBeat = bars->firstBarBeat;
+    const auto& normalized = bars->normalized;
+    const auto& weighted = bars->weighted;
+    const auto& variation = bars->variation;
+    const auto numBars = static_cast<int>(weighted.size());
 
     // Candidate boundaries at every 4th bar from the anchor
     std::vector<int> boundaries{0};

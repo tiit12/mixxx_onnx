@@ -123,7 +123,8 @@ bool AnalyzerBeats::initialize(const AnalyzerTrack& track,
             m_pPlugin = std::make_unique<mixxx::AnalyzerSoundTouchBeats>();
 #ifdef __ONNXRUNTIME__
         } else if (isBeatThisPlugin(m_pluginId)) {
-            m_pPlugin = std::make_unique<mixxx::AnalyzerBeatThisBeats>(m_pNeuralAnalysis);
+            m_pPlugin = std::make_unique<mixxx::AnalyzerBeatThisBeats>(
+                    m_pNeuralAnalysis, m_bPreferencesFixedTempo);
 #endif
         } else {
             // This must not happen, because we have already verified above

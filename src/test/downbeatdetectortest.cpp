@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <array>
 #include <cmath>
@@ -282,19 +283,59 @@ TEST_F(DownbeatDetectorTest, BeatThisBeats) {
     EXPECT_NEAR(0, phaseError / kSampleRate, 0.003);
 }
 
+TEST(AnalyzerBeatThisBeatsTest, ConstantTempoBeats) {
+    constexpr int kSampleRate = 44100;
+    constexpr double kBpm = 172.0;
+    constexpr double kFirstBeat = 0.3;
+    const double beatSeconds = 60.0 / kBpm;
+    QVector<mixxx::audio::FramePos> beats;
+    const auto addBeat = [&](int index, double errorSeconds) {
+        beats.append(mixxx::audio::FramePos(
+                (kFirstBeat + index * beatSeconds + errorSeconds) * kSampleRate));
+    };
+    for (int i = 0; i < 600; ++i) {
+        // A break without beats
+        if (i >= 50 && i < 130) {
+            continue;
+        }
+        // Half-time part
+        if (i >= 130 && i < 260 && i % 2 == 1) {
+            continue;
+        }
+        // Jitter of the neural network
+        addBeat(i, (i % 5 - 2) * 0.004);
+        // Drum fill between the beats
+        if (i % 64 == 63) {
+            addBeat(i, beatSeconds / 2);
+        }
+    }
+
+    const auto grid = mixxx::AnalyzerBeatThisBeats::constantTempoBeats(
+            beats, mixxx::audio::SampleRate(kSampleRate));
+    ASSERT_EQ(600, grid.size());
+    EXPECT_NEAR(kFirstBeat, grid.first().value() / kSampleRate, 0.002);
+    EXPECT_NEAR(beatSeconds, (grid.last() - grid.first()) / 599 / kSampleRate, 1e-5);
+}
+
 /// Development tool: compares the beats detected by Mixxx with the beat
 /// probabilities of the neural network for the audio files in the directory
-/// BEAT_PHASE_DIR, like the analysis of the tracks.
+/// BEAT_PHASE_DIR and its subdirectories, like the analysis of the tracks.
 TEST_F(DownbeatDetectorTest, DISABLED_BeatPhaseFiles) {
     ASSERT_TRUE(SoundSourceProxy::isFileTypeSupported(QStringLiteral("mp3")) ||
             SoundSourceProxy::registerProviders());
     const QDir dir(qEnvironmentVariable("BEAT_PHASE_DIR"));
-    const QStringList files = dir.entryList(
+    QStringList files;
+    QDirIterator it(dir.path(),
             {QStringLiteral("*.mp3"),
                     QStringLiteral("*.m4a"),
                     QStringLiteral("*.flac"),
                     QStringLiteral("*.wav")},
-            QDir::Files);
+            QDir::Files,
+            QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        files.append(dir.relativeFilePath(it.next()));
+    }
+    files.sort();
     ASSERT_FALSE(files.isEmpty()) << "Set BEAT_PHASE_DIR";
     for (const QString& fileName : files) {
         const TrackPointer pTrack = Track::newTemporary(dir.filePath(fileName));
@@ -368,12 +409,47 @@ TEST_F(DownbeatDetectorTest, DISABLED_BeatPhaseFiles) {
             if (!qEnvironmentVariableIsSet("BEAT_PHASE_SECTIONS")) {
                 return;
             }
-            const auto pBarInfo = AnalyzerBars::barInfoFromDownbeatLogits(*pBeats,
+            const auto pDetectedBarInfo = AnalyzerBars::barInfoFromDownbeatLogits(*pBeats,
                     downbeatDetector.downbeatLogits(),
                     mixxx::DownbeatDetector::kFramesPerSecond,
                     mixxx::audio::kStartFramePos);
-            ASSERT_NE(nullptr, pBarInfo);
-            std::printf("    anchor beat %d\n", pBarInfo->anchorBeat);
+            ASSERT_NE(nullptr, pDetectedBarInfo);
+            auto pBarInfo = std::make_shared<mixxx::BarInfo>(*pDetectedBarInfo);
+            pBarInfo->anchorBeat = mixxx::PhraseAnalyzer::findPhraseAnchor(
+                    *pBeats, *pBarInfo, downbeatDetector.bandEnergies());
+            std::printf("    first downbeat %d, phrase anchor beat %d\n",
+                    pDetectedBarInfo->anchorBeat,
+                    pBarInfo->anchorBeat);
+            // Band energies of the beats in the range BEAT_PHASE_BEATS=first-last
+            const QStringList beatRange = qEnvironmentVariable("BEAT_PHASE_BEATS").split('-');
+            const auto& bands = downbeatDetector.bandEnergies();
+            const auto toFrame = [&](int beat) {
+                return static_cast<int>((pBeats->cfirstmarker() + beat)->value() /
+                        sampleRate.value() * bands.framesPerSecond);
+            };
+            for (int beat = beatRange.size() == 2 ? beatRange[0].toInt() : 0;
+                    beatRange.size() == 2 && beat <= beatRange[1].toInt();
+                    ++beat) {
+                const int begin = toFrame(beat);
+                const int end = std::min(toFrame(beat + 1), static_cast<int>(bands.low.size()));
+                const auto meanDb = [&](const std::vector<float>& band) {
+                    double sum = 0;
+                    for (int frame = begin; frame < end; ++frame) {
+                        sum += band[frame];
+                    }
+                    return 10 * std::log10(sum / std::max(1, end - begin) + 1e-10);
+                };
+                const double low = meanDb(bands.low);
+                std::printf("    beat %4d %7.2f s  phrase beat %2d  low %5.1f  mid %5.1f  "
+                            "high %5.1f %s\n",
+                        beat,
+                        (pBeats->cfirstmarker() + beat)->value() / sampleRate.value(),
+                        pBarInfo->beatInPhrase(beat),
+                        low,
+                        meanDb(bands.mid),
+                        meanDb(bands.high),
+                        std::string(std::max(0, static_cast<int>(low + 40)), '#').c_str());
+            }
             for (const auto& section : mixxx::PhraseAnalyzer::analyze(
                          *pBeats, *pBarInfo, downbeatDetector.bandEnergies())) {
                 const auto position = *(pBeats->cfirstmarker() + section.startBeat);
@@ -385,10 +461,14 @@ TEST_F(DownbeatDetectorTest, DISABLED_BeatPhaseFiles) {
             }
         };
         printBeats("Queen Mary", beatDetector.getBeats());
-        printBeats("Beat This!",
-                mixxx::AnalyzerBeatThisBeats::beatsFromLogits(downbeatDetector.beatLogits(),
-                        mixxx::DownbeatDetector::kFramesPerSecond,
-                        sampleRate));
+        // Like AnalyzerBeatThisBeats with fixed tempo
+        const auto beatThisBeats = mixxx::AnalyzerBeatThisBeats::beatsFromLogits(
+                downbeatDetector.beatLogits(),
+                mixxx::DownbeatDetector::kFramesPerSecond,
+                sampleRate);
+        const auto beatThisGrid =
+                mixxx::AnalyzerBeatThisBeats::constantTempoBeats(beatThisBeats, sampleRate);
+        printBeats("Beat This!", beatThisGrid.isEmpty() ? beatThisBeats : beatThisGrid);
     }
 }
 

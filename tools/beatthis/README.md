@@ -21,6 +21,11 @@ of 87.5 BPM) and does not place the grid on the offbeats. The network runs
 only once per track for the beats and the phrases, so it is not slower than
 the Queen Mary beat tracker plus the phrase analysis.
 
+With *Assume constant tempo* (default), the beat grid is fitted to the beats
+of the neural network by linear regression, ignoring breaks without beats,
+half-time parts and drum fills. Tracks with a varying tempo get the grid of
+their longest part.
+
 Already analyzed tracks keep their beats. To analyze them again, enable
 *Re-analyze beats when settings change* or use *Analyze → Reanalyze* in the
 context menu of the library.
@@ -39,8 +44,16 @@ the kicks, keep the grid of the beat detector.
 
 `BEAT_PHASE_DIR=~/Music build/mixxx-test --gtest_also_run_disabled_tests
 --gtest_filter='*BeatPhaseFiles'` prints the beat grids of both beat
-detectors and the corrections for the audio files in a directory, with
-`BEAT_PHASE_SECTIONS=1` also the analyzed sections.
+detectors and the corrections for the audio files in a directory and its
+subdirectories, with `BEAT_PHASE_SECTIONS=1` also the analyzed sections and
+with `BEAT_PHASE_BEATS=100-140` the band energies of these beats.
+
+## Phrase start
+
+Tracks don't always start with a phrase, e.g. with a pickup bar. The
+phrases start at the bar (of the 8 bars from the first downbeat) where the
+sound changes most during the whole track, e.g. where the bass comes in or
+drops out, if it changes there 25 % more than at the first downbeat.
 
 ## Building on Ubuntu (Ubuntu Studio)
 

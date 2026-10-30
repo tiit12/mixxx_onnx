@@ -42,6 +42,14 @@ class PhraseAnalyzer {
             const BarInfo& barInfo,
             const BandEnergies& energies);
 
+    /// Finds the phrase start (anchor beat) that matches the changes of the
+    /// sound best, among the downbeats of the first phrase from the anchor
+    /// of the bar info. Tracks don't always start with a phrase, e.g. with a
+    /// pickup bar.
+    static int findPhraseAnchor(const Beats& beats,
+            const BarInfo& barInfo,
+            const BandEnergies& energies);
+
     /// Color of the sections in the waveform and of their hotcues
     static RgbColor sectionColor(PhraseKind kind);
     /// Label of the hotcues of the sections

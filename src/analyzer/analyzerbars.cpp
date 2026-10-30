@@ -61,7 +61,7 @@ constexpr double kMinBeatOnsetCorrectionSeconds = 0.002;
 
 // Increment if the results of the analysis change, to re-analyze the tracks
 const QString kFirstSoundAnalyzerVersion = QStringLiteral("first-sound-1");
-const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-6");
+const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-7");
 
 const QString kMixAssistantGroup = QStringLiteral("[MixAssistant]");
 
@@ -497,6 +497,15 @@ void AnalyzerBars::storeResults(TrackPointer pTrack) {
 
 #ifdef __ONNXRUNTIME__
     if (detected) {
+        if (!pUserBarInfo) {
+            const int anchorBeat = mixxx::PhraseAnalyzer::findPhraseAnchor(
+                    *pBeats, *pBarInfo, pDetector->bandEnergies());
+            if (anchorBeat != pBarInfo->anchorBeat) {
+                kLogger.info() << "Phrases start" << (anchorBeat - pBarInfo->anchorBeat)
+                               << "beats after the first downbeat";
+                pBarInfo->anchorBeat = anchorBeat;
+            }
+        }
         pBarInfo->phrases = mixxx::PhraseAnalyzer::analyze(
                 *pBeats, *pBarInfo, pDetector->bandEnergies());
     }
