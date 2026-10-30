@@ -237,6 +237,23 @@ TEST_F(DownbeatDetectorTest, BeatPhase) {
     EXPECT_TRUE(AnalyzerBars::shouldCorrectBeatPhase(phase, sampleRate));
 }
 
+TEST_F(DownbeatDetectorTest, BeatOnset) {
+    constexpr int kSampleRate = 44100;
+    runAndCompare(kSampleRate);
+    // The kicks of the test signal start exactly at the beats
+    for (const double firstBeatSeconds : {0.0, 0.03, -0.02}) {
+        const auto pBeats = mixxx::Beats::fromConstTempo(
+                mixxx::audio::SampleRate(kSampleRate),
+                mixxx::audio::FramePos((firstBeatSeconds + 60.0 / kBpm) * kSampleRate),
+                mixxx::Bpm(kBpm));
+        const auto offset = AnalyzerBars::findBeatOnset(*pBeats,
+                m_detector.bassEnergy(),
+                mixxx::DownbeatDetector::kBassBlocksPerSecond);
+        ASSERT_TRUE(offset.has_value()) << firstBeatSeconds;
+        EXPECT_NEAR(-firstBeatSeconds, *offset / kSampleRate, 0.003) << firstBeatSeconds;
+    }
+}
+
 TEST_F(DownbeatDetectorTest, BeatThisBeats) {
     constexpr int kSampleRate = 44100;
     runAndCompare(kSampleRate);
@@ -308,27 +325,37 @@ TEST_F(DownbeatDetectorTest, DISABLED_BeatPhaseFiles) {
         const auto printBeats = [&](const char* pName,
                                         const QVector<mixxx::audio::FramePos>& beats) {
             // Like AnalyzerBeats
-            const auto pBeats = BeatFactory::makePreferredBeats(beats, {}, true, sampleRate);
+            auto pBeats = BeatFactory::makePreferredBeats(beats, {}, true, sampleRate);
             ASSERT_NE(nullptr, pBeats);
             const auto phase = AnalyzerBars::findBeatPhase(*pBeats,
                     downbeatDetector.beatLogits(),
                     mixxx::DownbeatDetector::kFramesPerSecond);
             ASSERT_TRUE(phase.has_value());
+            const bool correct = AnalyzerBars::shouldCorrectBeatPhase(*phase, sampleRate);
+            const auto firstBeat = pBeats->iteratorFrom(mixxx::audio::kStartFramePos)->value();
+            const auto bpm = pBeats->getBpmInRange(mixxx::audio::kStartFramePos,
+                    mixxx::audio::FramePos(pAudioSource->frameLength()));
+            if (correct) {
+                pBeats = pBeats->tryTranslate(phase->offset).value_or(pBeats);
+            }
+            const auto onset = AnalyzerBars::findBeatOnset(*pBeats,
+                    downbeatDetector.bassEnergy(),
+                    mixxx::DownbeatDetector::kBassBlocksPerSecond);
             std::printf(
                     "  %-11s %.3f BPM, first beat %.4f s, phase offset %+.1f ms, "
-                    "beat probability %.2f -> %.2f%s\n",
+                    "beat probability %.2f -> %.2f%s, onset %s\n",
                     pName,
-                    pBeats->getBpmInRange(mixxx::audio::kStartFramePos,
-                                  mixxx::audio::FramePos(pAudioSource->frameLength()))
-                            .value(),
-                    pBeats->iteratorFrom(mixxx::audio::kStartFramePos)->value() /
-                            sampleRate.value(),
+                    bpm.value(),
+                    firstBeat / sampleRate.value(),
                     phase->offset / sampleRate.value() * 1000,
                     phase->originalActivation,
                     phase->activation,
-                    AnalyzerBars::shouldCorrectBeatPhase(*phase, sampleRate)
-                            ? ", corrected"
-                            : "");
+                    correct ? ", corrected" : "",
+                    onset ? QString::number(*onset / sampleRate.value() * 1000, 'f', 1)
+                                    .append(QStringLiteral(" ms"))
+                                    .toStdString()
+                                    .c_str()
+                          : "none");
         };
         printBeats("Queen Mary", beatDetector.getBeats());
         printBeats("Beat This!",

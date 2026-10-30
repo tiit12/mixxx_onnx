@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -34,6 +35,10 @@ class DownbeatDetector {
     static constexpr int kChunkFrames = 1500;
     /// Predictions at the chunk borders are discarded.
     static constexpr int kBorderFrames = 6;
+    /// Samples (at kSampleRate) per value of bassEnergy()
+    static constexpr int kBassBlockSize = 32;
+    static constexpr double kBassBlocksPerSecond =
+            static_cast<double>(kSampleRate) / kBassBlockSize;
 
     DownbeatDetector();
     ~DownbeatDetector();
@@ -60,8 +65,18 @@ class DownbeatDetector {
         return m_bandEnergies;
     }
 
+    /// Energy of the low-pass filtered signal (kick drum and bass) in blocks
+    /// of kBassBlockSize samples. Block `i` starts at `i / kBassBlocksPerSecond`
+    /// seconds. The neural network places the beats some milliseconds after
+    /// the start of the kick drum, which can be found precisely in this
+    /// signal.
+    const std::vector<float>& bassEnergy() const {
+        return m_bassEnergy;
+    }
+
   private:
     void appendResampled(const double* pSamples, int count);
+    void appendBassSample(double sample);
     double signalAt(SINT index) const;
     void computeFrames();
     bool runReadyChunks();
@@ -103,6 +118,13 @@ class DownbeatDetector {
     std::vector<float> m_beatLogits;
     std::vector<float> m_downbeatLogits;
     BandEnergies m_bandEnergies;
+
+    /// Biquad low-pass filter for bassEnergy(): b0, b1, b2, a1, a2
+    std::array<double, 5> m_bassFilter;
+    std::array<double, 4> m_bassFilterState;
+    double m_bassBlockEnergy;
+    int m_bassBlockSamples;
+    std::vector<float> m_bassEnergy;
 };
 
 } // namespace mixxx

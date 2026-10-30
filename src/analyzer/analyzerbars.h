@@ -58,6 +58,16 @@ class AnalyzerBars : public Analyzer {
     static bool shouldCorrectBeatPhase(const BeatPhase& phase,
             mixxx::audio::SampleRate sampleRate);
 
+    /// Finds the start of the kick drum near the beats of a beat grid with
+    /// constant tempo in the mean bass energy around the beats, i.e. the
+    /// frames by which the beats need to be moved to the start of the
+    /// sound. Returns std::nullopt if the bass has no clear onset at the
+    /// beats, e.g. without kick drum.
+    static std::optional<mixxx::audio::FrameDiff_t> findBeatOnset(
+            const mixxx::Beats& beats,
+            const std::vector<float>& bassEnergy,
+            double blocksPerSecond);
+
     /// Chooses the downbeats among the beats by summing up the downbeat
     /// probabilities of each position in the bar. The phrases start at the
     /// first downbeat at or after `firstSound`.

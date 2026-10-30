@@ -36,6 +36,24 @@ constexpr double kMinBeatPhaseCorrectionSeconds = 0.005;
 // neural network must clearly hear the beats
 constexpr double kMinBeatPhaseActivation = 0.3;
 
+// The kick drum is searched in this range around the beats. The range ends
+// shortly after the beats, because the bass that follows the kick drum can
+// be louder than the kick drum.
+constexpr double kBeatOnsetSearchBeforeSeconds = 0.08;
+constexpr double kBeatOnsetSearchAfterSeconds = 0.025;
+// The minimum before the kick drum is searched from here
+constexpr double kBeatOnsetBaseBeforeSeconds = 0.1;
+// Smoothing of the mean bass energy, against the ripple of low frequencies
+constexpr double kBeatOnsetSmoothingSeconds = 0.007;
+// The onset is where the bass amplitude has risen by this part from the
+// minimum before the kick drum to its maximum
+constexpr double kBeatOnsetLevel = 0.15;
+// The maximum of the bass amplitude must be this much higher than the
+// minimum
+constexpr double kMinBeatOnsetContrast = 1.3;
+constexpr int kMinBeatOnsetBeats = 16;
+constexpr double kMinBeatOnsetCorrectionSeconds = 0.002;
+
 // Increment if the results of the analysis change, to re-analyze the tracks
 const QString kFirstSoundAnalyzerVersion = QStringLiteral("first-sound-1");
 const QString kNeuralAnalyzerVersion = QStringLiteral("beat-this-small0-phrases-6");
@@ -269,6 +287,81 @@ bool AnalyzerBars::shouldCorrectBeatPhase(
             phase.activation >= kMinBeatPhaseActivation;
 }
 
+// static
+std::optional<mixxx::audio::FrameDiff_t> AnalyzerBars::findBeatOnset(
+        const mixxx::Beats& beats,
+        const std::vector<float>& bassEnergy,
+        double blocksPerSecond) {
+    if (!beats.hasConstantTempo() || bassEnergy.empty() || blocksPerSecond <= 0) {
+        return std::nullopt;
+    }
+    const double sampleRate = beats.getSampleRate().value();
+    const auto numBlocks = static_cast<int>(bassEnergy.size());
+    const auto toBlocks = [&](double seconds) {
+        return static_cast<int>(std::round(seconds * blocksPerSecond));
+    };
+    const int halfWindow = toBlocks(kBeatOnsetSmoothingSeconds / 2);
+    const int before = toBlocks(kBeatOnsetBaseBeforeSeconds);
+    const int after = toBlocks(kBeatOnsetSearchAfterSeconds) + halfWindow;
+
+    // Mean bass energy around the beats, index `before` is at the beats
+    std::vector<double> profile(before + after + 1, 0.0);
+    int numBeats = 0;
+    for (auto it = beats.iteratorFrom(mixxx::audio::kStartFramePos); it != beats.cend(); ++it) {
+        // Blocks are centered at `(i + 0.5) / blocksPerSecond`
+        const auto block = static_cast<int>(
+                std::round(it->value() / sampleRate * blocksPerSecond - 0.5));
+        if (block - before < 0) {
+            continue;
+        }
+        if (block + after >= numBlocks) {
+            break;
+        }
+        for (std::size_t i = 0; i < profile.size(); ++i) {
+            profile[i] += bassEnergy[block - before + i];
+        }
+        numBeats++;
+    }
+    if (numBeats < kMinBeatOnsetBeats) {
+        return std::nullopt;
+    }
+
+    // Smoothed amplitude, like the waveform
+    const auto size = static_cast<int>(profile.size());
+    std::vector<double> amplitude(profile.size());
+    for (int i = 0; i < size; ++i) {
+        const int begin = std::max(0, i - halfWindow);
+        const int end = std::min(size, i + halfWindow + 1);
+        double sum = 0;
+        for (int j = begin; j < end; ++j) {
+            sum += profile[j];
+        }
+        amplitude[i] = std::sqrt(sum / (end - begin));
+    }
+
+    const auto searchBegin = amplitude.cbegin() + before - toBlocks(kBeatOnsetSearchBeforeSeconds);
+    const auto searchEnd = amplitude.cbegin() + before + toBlocks(kBeatOnsetSearchAfterSeconds) + 1;
+    const auto peak = static_cast<int>(
+            std::max_element(searchBegin, searchEnd) - amplitude.cbegin());
+    const double minimum = *std::min_element(amplitude.cbegin(), amplitude.cbegin() + peak + 1);
+    if (amplitude[peak] < kMinBeatOnsetContrast * minimum || amplitude[peak] <= 0) {
+        return std::nullopt;
+    }
+    const double level = minimum + kBeatOnsetLevel * (amplitude[peak] - minimum);
+    int onset = peak;
+    while (onset > 0 && amplitude[onset - 1] >= level) {
+        onset--;
+    }
+    if (onset == 0) {
+        // The bass rises before the search range
+        return std::nullopt;
+    }
+    // Interpolate between the blocks
+    const double position = onset - 1 +
+            (level - amplitude[onset - 1]) / (amplitude[onset] - amplitude[onset - 1]);
+    return (position - before) / blocksPerSecond * sampleRate;
+}
+
 bool AnalyzerBars::initialize(const AnalyzerTrack& track,
         mixxx::audio::SampleRate sampleRate,
         mixxx::audio::ChannelCount channelCount,
@@ -312,21 +405,35 @@ void AnalyzerBars::storeResults(TrackPointer pTrack) {
     // Only beats that have just been detected by AnalyzerBeats are corrected,
     // beats adjusted by the user are kept.
     if (detected && pBeats != m_pBeatsBeforeAnalysis) {
+        const double sampleRate = pBeats->getSampleRate().value();
+        const auto translate = [&](mixxx::audio::FrameDiff_t offset) {
+            const auto translated = pBeats->tryTranslate(offset);
+            if (translated && pTrack->trySetBeats(*translated)) {
+                pBeats = *translated;
+            }
+        };
         const auto phase = findBeatPhase(*pBeats,
                 pDetector->beatLogits(),
                 mixxx::DownbeatDetector::kFramesPerSecond);
         if (phase) {
             const bool correct = shouldCorrectBeatPhase(*phase, pBeats->getSampleRate());
-            kLogger.info() << "Beat phase offset"
-                           << phase->offset / pBeats->getSampleRate().value() * 1000
+            kLogger.info() << "Beat phase offset" << phase->offset / sampleRate * 1000
                            << "ms, beat probability" << phase->originalActivation
                            << "->" << phase->activation
                            << (correct ? "corrected" : "not corrected");
             if (correct) {
-                const auto translated = pBeats->tryTranslate(phase->offset);
-                if (translated && pTrack->trySetBeats(*translated)) {
-                    pBeats = *translated;
-                }
+                translate(phase->offset);
+            }
+        }
+        // The neural network places the beats slightly after the start of
+        // the kick drum
+        const auto onset = findBeatOnset(*pBeats,
+                pDetector->bassEnergy(),
+                mixxx::DownbeatDetector::kBassBlocksPerSecond);
+        if (onset) {
+            kLogger.info() << "Beat onset offset" << *onset / sampleRate * 1000 << "ms";
+            if (std::abs(*onset) >= kMinBeatOnsetCorrectionSeconds * sampleRate) {
+                translate(*onset);
             }
         }
     }

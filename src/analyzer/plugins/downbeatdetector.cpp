@@ -33,6 +33,10 @@ constexpr double kHzPerBin = static_cast<double>(DownbeatDetector::kSampleRate) 
 constexpr int kLowBandEndBin = static_cast<int>(kLowBandMaxHz / kHzPerBin) + 1;
 constexpr int kMidBandEndBin = static_cast<int>(kMidBandMaxHz / kHzPerBin) + 1;
 
+// Cutoff of the low-pass filter for DownbeatDetector::bassEnergy(), like the
+// low band of the waveform
+constexpr double kBassCutoffHz = 600;
+
 Ort::Env& ortEnv() {
     static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "mixxx");
     return env;
@@ -92,7 +96,16 @@ DownbeatDetector::DownbeatDetector()
           m_framesOffset(0),
           m_numFrames(0),
           m_numChunksProcessed(0),
-          m_logitsWrittenUntil(0) {
+          m_logitsWrittenUntil(0),
+          m_bassFilterState{},
+          m_bassBlockEnergy(0),
+          m_bassBlockSamples(0) {
+    // Butterworth low-pass (Audio EQ Cookbook)
+    const double w0 = 2 * M_PI * kBassCutoffHz / kSampleRate;
+    const double alpha = std::sin(w0) / std::sqrt(2.0);
+    const double a0 = 1 + alpha;
+    const double b1 = (1 - std::cos(w0)) / a0;
+    m_bassFilter = {b1 / 2, b1, b1 / 2, -2 * std::cos(w0) / a0, (1 - alpha) / a0};
 }
 
 DownbeatDetector::~DownbeatDetector() = default;
@@ -174,8 +187,25 @@ void DownbeatDetector::appendResampled(const double* pSamples, int count) {
     m_latencyToDrop -= dropped;
     for (int i = dropped; i < count; ++i) {
         m_signal.push_back(static_cast<float>(pSamples[i]));
+        appendBassSample(pSamples[i]);
     }
     m_signalLength += count - dropped;
+}
+
+void DownbeatDetector::appendBassSample(double sample) {
+    auto& [x1, x2, y1, y2] = m_bassFilterState;
+    const auto& [b0, b1, b2, a1, a2] = m_bassFilter;
+    const double y = b0 * sample + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1;
+    x1 = sample;
+    y2 = y1;
+    y1 = y;
+    m_bassBlockEnergy += y * y;
+    if (++m_bassBlockSamples == kBassBlockSize) {
+        m_bassEnergy.push_back(static_cast<float>(m_bassBlockEnergy));
+        m_bassBlockEnergy = 0;
+        m_bassBlockSamples = 0;
+    }
 }
 
 double DownbeatDetector::signalAt(SINT index) const {

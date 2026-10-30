@@ -29,6 +29,12 @@ With the Queen Mary beat tracker, newly detected beat grids are moved to the
 beats of the neural network if they are off by 5 ms or more, e.g. on the
 offbeats. Beat grids adjusted by the user are not changed.
 
+The neural network places the beats 15-30 ms after the start of the kick
+drum. Therefore newly detected beat grids (of both beat detectors) are
+moved to the start of the kick drum, which is found in the mean amplitude
+of the low band (below 600 Hz, the red part of the waveform) around the
+beats. Tracks without a clear kick drum keep the grid of the beat detector.
+
 ## Building on Ubuntu (Ubuntu Studio)
 
 ONNX Runtime is packaged in `universe` since Ubuntu 26.04:
