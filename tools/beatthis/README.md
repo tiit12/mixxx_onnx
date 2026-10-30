@@ -33,7 +33,14 @@ The neural network places the beats 15-30 ms after the start of the kick
 drum. Therefore newly detected beat grids (of both beat detectors) are
 moved to the start of the kick drum, which is found in the mean amplitude
 of the low band (below 600 Hz, the red part of the waveform) around the
-beats. Tracks without a clear kick drum keep the grid of the beat detector.
+louder half of the beats, i.e. without the intro or breakdown without kick
+drum. Tracks without a clear kick drum, e.g. with a loud bassline between
+the kicks, keep the grid of the beat detector.
+
+`BEAT_PHASE_DIR=~/Music build/mixxx-test --gtest_also_run_disabled_tests
+--gtest_filter='*BeatPhaseFiles'` prints the beat grids of both beat
+detectors and the corrections for the audio files in a directory, with
+`BEAT_PHASE_SECTIONS=1` also the analyzed sections.
 
 ## Building on Ubuntu (Ubuntu Studio)
 

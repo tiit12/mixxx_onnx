@@ -10,6 +10,7 @@
 
 #include "analyzer/analyzerbars.h"
 #include "analyzer/constants.h"
+#include "analyzer/phraseanalyzer.h"
 #include "analyzer/plugins/analyzerbeatthisbeats.h"
 #include "analyzer/plugins/analyzerqueenmarybeats.h"
 #include "analyzer/plugins/downbeatdetector.h"
@@ -289,7 +290,10 @@ TEST_F(DownbeatDetectorTest, DISABLED_BeatPhaseFiles) {
             SoundSourceProxy::registerProviders());
     const QDir dir(qEnvironmentVariable("BEAT_PHASE_DIR"));
     const QStringList files = dir.entryList(
-            {QStringLiteral("*.mp3"), QStringLiteral("*.flac"), QStringLiteral("*.wav")},
+            {QStringLiteral("*.mp3"),
+                    QStringLiteral("*.m4a"),
+                    QStringLiteral("*.flac"),
+                    QStringLiteral("*.wav")},
             QDir::Files);
     ASSERT_FALSE(files.isEmpty()) << "Set BEAT_PHASE_DIR";
     for (const QString& fileName : files) {
@@ -356,6 +360,29 @@ TEST_F(DownbeatDetectorTest, DISABLED_BeatPhaseFiles) {
                                     .toStdString()
                                     .c_str()
                           : "none");
+            if (onset) {
+                pBeats = pBeats->tryTranslate(*onset).value_or(pBeats);
+            }
+
+            // Bars and sections like AnalyzerBars, with BEAT_PHASE_SECTIONS
+            if (!qEnvironmentVariableIsSet("BEAT_PHASE_SECTIONS")) {
+                return;
+            }
+            const auto pBarInfo = AnalyzerBars::barInfoFromDownbeatLogits(*pBeats,
+                    downbeatDetector.downbeatLogits(),
+                    mixxx::DownbeatDetector::kFramesPerSecond,
+                    mixxx::audio::kStartFramePos);
+            ASSERT_NE(nullptr, pBarInfo);
+            std::printf("    anchor beat %d\n", pBarInfo->anchorBeat);
+            for (const auto& section : mixxx::PhraseAnalyzer::analyze(
+                         *pBeats, *pBarInfo, downbeatDetector.bandEnergies())) {
+                const auto position = *(pBeats->cfirstmarker() + section.startBeat);
+                std::printf("    %7.2f s  beat %4d  beat in phrase %2d  %s\n",
+                        position.value() / sampleRate.value(),
+                        section.startBeat,
+                        pBarInfo->beatInPhrase(section.startBeat),
+                        mixxx::phraseKindName(section.kind).toStdString().c_str());
+            }
         };
         printBeats("Queen Mary", beatDetector.getBeats());
         printBeats("Beat This!",

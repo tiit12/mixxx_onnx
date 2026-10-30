@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <numeric>
 #include <optional>
 
 #include "analyzer/analyzertrack.h"
@@ -48,9 +50,12 @@ constexpr double kBeatOnsetSmoothingSeconds = 0.007;
 // The onset is where the bass amplitude has risen by this part from the
 // minimum before the kick drum to its maximum
 constexpr double kBeatOnsetLevel = 0.15;
-// The maximum of the bass amplitude must be this much higher than the
-// minimum
-constexpr double kMinBeatOnsetContrast = 1.3;
+// The maximum of the bass amplitude must be this much higher than the mean
+// amplitude from kBeatOnsetBaseBeforeSeconds to
+// kBeatOnsetContrastBeforeSeconds before the beats. Otherwise the bass is
+// too loud between the kicks to find their onsets reliably.
+constexpr double kMinBeatOnsetContrast = 1.4;
+constexpr double kBeatOnsetContrastBeforeSeconds = 0.04;
 constexpr int kMinBeatOnsetBeats = 16;
 constexpr double kMinBeatOnsetCorrectionSeconds = 0.002;
 
@@ -304,9 +309,8 @@ std::optional<mixxx::audio::FrameDiff_t> AnalyzerBars::findBeatOnset(
     const int before = toBlocks(kBeatOnsetBaseBeforeSeconds);
     const int after = toBlocks(kBeatOnsetSearchAfterSeconds) + halfWindow;
 
-    // Mean bass energy around the beats, index `before` is at the beats
-    std::vector<double> profile(before + after + 1, 0.0);
-    int numBeats = 0;
+    // The first block around each beat and the bass energy around it
+    std::vector<std::pair<double, int>> beatBlocks;
     for (auto it = beats.iteratorFrom(mixxx::audio::kStartFramePos); it != beats.cend(); ++it) {
         // Blocks are centered at `(i + 0.5) / blocksPerSecond`
         const auto block = static_cast<int>(
@@ -317,13 +321,27 @@ std::optional<mixxx::audio::FrameDiff_t> AnalyzerBars::findBeatOnset(
         if (block + after >= numBlocks) {
             break;
         }
-        for (std::size_t i = 0; i < profile.size(); ++i) {
-            profile[i] += bassEnergy[block - before + i];
-        }
-        numBeats++;
+        const auto first = bassEnergy.cbegin() + block - before;
+        beatBlocks.emplace_back(
+                std::accumulate(first, first + before + after + 1, 0.0), block - before);
     }
-    if (numBeats < kMinBeatOnsetBeats) {
+    // Only the louder half of the beats, without the parts of the track
+    // without kick drum, e.g. the intro or the breakdown
+    const std::size_t numBeats = beatBlocks.size() / 2;
+    if (static_cast<int>(numBeats) < kMinBeatOnsetBeats) {
         return std::nullopt;
+    }
+    std::nth_element(beatBlocks.begin(),
+            beatBlocks.begin() + numBeats,
+            beatBlocks.end(),
+            std::greater<>());
+
+    // Mean bass energy around the beats, index `before` is at the beats
+    std::vector<double> profile(before + after + 1, 0.0);
+    for (std::size_t beat = 0; beat < numBeats; ++beat) {
+        for (std::size_t i = 0; i < profile.size(); ++i) {
+            profile[i] += bassEnergy[beatBlocks[beat].second + i];
+        }
     }
 
     // Smoothed amplitude, like the waveform
@@ -339,21 +357,26 @@ std::optional<mixxx::audio::FrameDiff_t> AnalyzerBars::findBeatOnset(
         amplitude[i] = std::sqrt(sum / (end - begin));
     }
 
-    const auto searchBegin = amplitude.cbegin() + before - toBlocks(kBeatOnsetSearchBeforeSeconds);
-    const auto searchEnd = amplitude.cbegin() + before + toBlocks(kBeatOnsetSearchAfterSeconds) + 1;
+    const int searchBegin = before - toBlocks(kBeatOnsetSearchBeforeSeconds);
+    const int searchEnd = before + toBlocks(kBeatOnsetSearchAfterSeconds) + 1;
     const auto peak = static_cast<int>(
-            std::max_element(searchBegin, searchEnd) - amplitude.cbegin());
-    const double minimum = *std::min_element(amplitude.cbegin(), amplitude.cbegin() + peak + 1);
-    if (amplitude[peak] < kMinBeatOnsetContrast * minimum || amplitude[peak] <= 0) {
+            std::max_element(amplitude.cbegin() + searchBegin, amplitude.cbegin() + searchEnd) -
+            amplitude.cbegin());
+    // The kick drum must stand out of the bass before it
+    const auto contrastEnd = amplitude.cbegin() + before - toBlocks(kBeatOnsetContrastBeforeSeconds);
+    const double meanBefore = std::accumulate(amplitude.cbegin(), contrastEnd, 0.0) /
+            (contrastEnd - amplitude.cbegin());
+    if (amplitude[peak] < kMinBeatOnsetContrast * meanBefore || amplitude[peak] <= 0) {
         return std::nullopt;
     }
+    const double minimum = *std::min_element(amplitude.cbegin(), amplitude.cbegin() + peak + 1);
     const double level = minimum + kBeatOnsetLevel * (amplitude[peak] - minimum);
     int onset = peak;
-    while (onset > 0 && amplitude[onset - 1] >= level) {
+    while (onset > searchBegin && amplitude[onset - 1] >= level) {
         onset--;
     }
-    if (onset == 0) {
-        // The bass rises before the search range
+    if (onset == searchBegin) {
+        // No clear onset within the search range
         return std::nullopt;
     }
     // Interpolate between the blocks
